@@ -371,7 +371,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                             {group.affiliation && <span className="text-[14px] px-3 py-0.5 rounded-lg bg-[#e0f2fe] text-[#0284c7] border border-[#bae6fd] font-semibold">{group.affiliation}</span>}
                           </div>
                         )}
-                        <div className="text-[20px] font-[800] text-header-navy truncate">{group.title}</div>
+                        <div className="text-[16px] font-[800] text-header-navy truncate">{group.title}</div>
                         <div className="text-[15px] font-medium text-text-sub">
                           {group.author} <span className="text-muted-foreground">|</span> {formatDateShort(group.date)} <span className="text-muted-foreground">{group.time}</span>
                         </div>
@@ -410,7 +410,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                         </div>
                         <div className="flex-1 min-w-0 flex flex-col gap-1.5">
                           <div className="flex items-center gap-2.5 mb-1">
-                            <span className="text-[20px] font-[800] text-header-navy truncate">{doc.title}</span>
+                            <span className="text-[16px] font-[800] text-header-navy truncate">{doc.title}</span>
                           </div>
                           <div className="flex items-center gap-1.5 text-[15px] font-medium text-text-sub mb-2">
                             <span className="font-semibold">{doc.author}</span>
@@ -458,7 +458,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                         <MapPin className="w-4 h-4 text-text-sub shrink-0" />
                         <span className="text-[15px] text-text-sub font-bold truncate">{doc.title}</span>
                       </div>
-                      <div className="text-[20px] font-[800] text-header-navy truncate">{doc.files[0]?.name || doc.title}</div>
+                      <div className="text-[16px] font-[800] text-header-navy truncate">{doc.files[0]?.name || doc.title}</div>
                       <div className="text-[15px] text-text-sub font-medium">
                         {formatDateShort(doc.date)} · {doc.files[0]?.size || ''}
                       </div>

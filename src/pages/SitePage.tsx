@@ -315,7 +315,7 @@ function WorkerSitePage() {
   return (
     <div className="animate-fade-in">
       {/* Search + Sort */}
-      <div className="flex gap-2 mb-3 mt-1">
+      <div className="flex gap-2 mb-3 mt-3">
         <div className="relative flex-1">
           <input
             type="text"
@@ -358,7 +358,7 @@ function WorkerSitePage() {
         <select
           value={sort}
           onChange={e => setSort(e.target.value as SortType)}
-          className="w-[95px] h-[50px] rounded-xl px-3 text-sm-app font-semibold bg-card border border-border text-foreground appearance-none cursor-pointer outline-none transition-all hover:border-primary/50 focus:border-primary focus:shadow-input-focus"
+          className="w-[95px] h-[50px] rounded-xl px-3 text-sm-app font-semibold bg-card border border-border text-foreground appearance-none cursor-pointer outline-none transition-all hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)]"
           style={{
             backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
             backgroundRepeat: "no-repeat",
@@ -437,7 +437,7 @@ function WorkerSitePage() {
                 )}
 
                 <div className="flex items-start justify-between mb-2 pr-16">
-                  <h3 className="text-lg-app font-[800] text-header-navy flex-1 leading-tight" style={{ wordBreak: "keep-all" }}>{site.name}</h3>
+                  <h3 className="text-[16px] font-[800] text-header-navy flex-1 leading-tight" style={{ wordBreak: "keep-all" }}>{site.name}</h3>
                   <button onClick={e => togglePin(site.id, e)} className="bg-transparent border-none p-1 cursor-pointer ml-2">
                     {site.pinned ? <PinOff className="w-[22px] h-[22px] text-primary" /> : <Pin className="w-[22px] h-[22px] text-border" />}
                   </button>

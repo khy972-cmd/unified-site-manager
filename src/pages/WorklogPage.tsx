@@ -95,7 +95,7 @@ function WorkerWorklogPage() {
   return (
     <div className="animate-fade-in">
       {/* Search */}
-      <div className="relative mb-3 mt-1">
+      <div className="relative mb-3 mt-3">
         <input
           value={search}
           onChange={e => setSearch(e.target.value)}
