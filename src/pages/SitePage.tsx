@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Search, MapPin, ChevronDown, ChevronUp, Pin, PinOff, Phone, Ruler,
-  Camera, FileCheck2, ClipboardList, CheckCircle2, Cloud, Sun, CloudRain, X, Plus, Map as MapIcon
+  Camera, FileCheck2, ClipboardList, CheckCircle2, X, Plus, Map as MapIcon
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -45,17 +45,6 @@ interface SiteData {
   drawings: { construction: any[]; progress: any[]; completion: any[] };
 }
 
-const WEATHER_MAP: Record<string, { text: string; icon: typeof Sun }> = {
-  "대구": { text: "맑음 27°C", icon: Sun },
-  "경기": { text: "비 19°C", icon: CloudRain },
-  "서울": { text: "흐림 21°C", icon: Cloud },
-  "부산": { text: "맑음 24°C", icon: Sun },
-};
-
-function getWeather(addr: string) {
-  const region = Object.keys(WEATHER_MAP).find(k => addr.includes(k));
-  return region ? WEATHER_MAP[region] : { text: "맑음 20°C", icon: Sun };
-}
 
 const INITIAL_SITES: SiteData[] = [
   { id: 1, name: "자이 아파트 101동 신축공사", addr: "대구광역시 동구 동부로 149", lodge: "대구광역시 동구 신암동 123-45", status: "ing", affil: "대구지사", manager: "이현수 소장", safety: "김안전 과장", phoneM: "010-1234-5678", phoneS: "010-9876-5432", days: 245, mp: 3, pinned: true, lastDate: "2025-12-09", lastTime: "10:30", hasDraw: true, hasPhoto: true, hasPTW: true, hasLog: true, hasPunch: true, ptw: { title: "작업허가서", status: "승인완료", pages: 2 }, workLog: { title: "작업일지", status: "작성완료", pages: 3 }, punch: { title: "하자목록", status: "조치중", pages: 1 }, images: ["sample1.jpg", "sample2.jpg"], drawings: { construction: [{ name: "1층 평면도.pdf" }, { name: "2층 평면도.pdf" }], progress: [{ name: "현장사진_01.jpg", type: "img" }], completion: [{ name: "완료도면.pdf" }] } },
@@ -111,17 +100,19 @@ function WorkerSitePage() {
   // Enrich sites with live worklog data
   const enrichedSites = useMemo(() => {
     return sites.map(site => {
-      const siteLogs = worklogs.filter(w =>
-        w.siteName === site.name ||
-        w.siteName.includes(site.name.split(" ")[0]) ||
-        site.name.includes(w.siteName)
-      );
+      const siteName = site.name || "";
+      const siteKey = siteName.split(" ")[0] || siteName;
+      const siteLogs = worklogs.filter(w => {
+        const logSiteName = (w.siteName || "").trim();
+        if (!logSiteName) return false;
+        return logSiteName === siteName || logSiteName.includes(siteKey) || siteName.includes(logSiteName);
+      });
       const approvedLogs = siteLogs.filter(w => w.status === "approved");
-      const sitePunch = allPunchGroups.filter(g =>
-        g.title === site.name ||
-        g.title.includes(site.name.split(" ")[0]) ||
-        site.name.includes(g.title)
-      );
+      const sitePunch = allPunchGroups.filter(g => {
+        const groupTitle = (g.title || "").trim();
+        if (!groupTitle) return false;
+        return groupTitle === siteName || groupTitle.includes(siteKey) || siteName.includes(groupTitle);
+      });
       const punchItems = sitePunch.flatMap(g => g.punchItems || []);
       const openPunch = punchItems.filter(i => i.status !== 'done').length;
       return {
@@ -407,8 +398,6 @@ function WorkerSitePage() {
         {displayed.map(site => {
           const expanded = expandedIds.has(site.id);
           const statusConf = STATUS_CONFIG[site.status];
-          const weather = getWeather(site.addr);
-          const WeatherIcon = weather.icon;
           const hasAddr = !!site.addr?.trim();
           const hasDraw = site.hasDraw;
           const hasPhoto = site.hasPhoto;
@@ -436,8 +425,8 @@ function WorkerSitePage() {
                   </div>
                 )}
 
-                <div className="flex items-start justify-between mb-2 pr-16">
-                  <h3 className="text-[16px] font-[800] text-header-navy flex-1 leading-tight" style={{ wordBreak: "keep-all" }}>{site.name}</h3>
+                <div className="flex items-start justify-between mb-2">
+                  <h3 className="text-[20px] font-[800] text-header-navy flex-1 leading-tight" style={{ wordBreak: "keep-all" }}>{site.name}</h3>
                   <button onClick={e => togglePin(site.id, e)} className="bg-transparent border-none p-1 cursor-pointer ml-2">
                     {site.pinned ? <PinOff className="w-[22px] h-[22px] text-primary" /> : <Pin className="w-[22px] h-[22px] text-border" />}
                   </button>
@@ -453,9 +442,6 @@ function WorkerSitePage() {
                         ? "bg-red-50 text-red-700 border-red-200"
                         : "bg-sky-50 text-sky-600 border-sky-200"
                     )}>{site.affil}</span>
-                    <span className="text-[14px] px-3 h-[34px] rounded-lg border border-border bg-muted text-text-sub font-semibold flex items-center gap-1.5">
-                      <WeatherIcon className="w-3.5 h-3.5" />{weather.text}
-                    </span>
                   </div>
                   <div className="flex gap-1.5 items-center pl-2 border-l border-border ml-1">
                     <MapIcon className={cn("w-4 h-4 transition-colors", hasDraw ? "text-header-navy" : "text-border")} />

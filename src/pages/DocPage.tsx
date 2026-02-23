@@ -358,20 +358,20 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                   <div key={group.id} className={cn("bg-card rounded-2xl p-4 cursor-pointer transition-all shadow-soft relative overflow-hidden", isSelected && "border-2 border-primary bg-sky-50/50")} onClick={() => openDetail(group.id)}>
                     <span className={cn("absolute top-0 right-0 text-[13px] font-bold px-3.5 py-1.5 text-white rounded-bl-xl z-10", statusBadge.cls)}>{statusBadge.text}</span>
                     <div className="flex gap-3 items-center">
-                      <div onClick={(e) => { e.stopPropagation(); toggleSelect(group.id); }} className={cn("w-[30px] h-[30px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all", isSelected ? "bg-sky-500 border-sky-500 shadow-[0_2px_8px_rgba(14,165,233,0.3)]" : "bg-card border-muted-foreground/30")}>
+                      <div onClick={(e) => { e.stopPropagation(); toggleSelect(group.id); }} className={cn("w-[20px] h-[20px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all", isSelected ? "bg-sky-500 border-sky-500 shadow-[0_2px_8px_rgba(14,165,233,0.3)]" : "bg-card border-muted-foreground/30")}>
                         {isSelected && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
                       </div>
                       <div className="w-20 h-20 rounded-xl bg-muted border border-border overflow-hidden shrink-0">
                         {thumbUrl ? <img src={thumbUrl} alt="" className="w-full h-full object-cover" /> : <FileText className="w-8 h-8 text-muted-foreground m-auto mt-6" />}
                       </div>
-                      <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                      <div className="flex-1 min-w-0 flex flex-col gap-1.5 pt-0.5">
                         {(group.contractor || group.affiliation) && (
                           <div className="flex gap-1.5 flex-wrap">
                             {group.contractor && <span className="text-[14px] px-3 py-0.5 rounded-lg bg-indigo-50 text-indigo-500 border border-indigo-200 font-semibold">{group.contractor}</span>}
                             {group.affiliation && <span className="text-[14px] px-3 py-0.5 rounded-lg bg-[#e0f2fe] text-[#0284c7] border border-[#bae6fd] font-semibold">{group.affiliation}</span>}
                           </div>
                         )}
-                        <div className="text-[16px] font-[800] text-header-navy truncate">{group.title}</div>
+                        <div className="text-[16px] font-[800] text-header-navy truncate mt-0.5">{group.title}</div>
                         <div className="text-[15px] font-medium text-text-sub">
                           {group.author} <span className="text-muted-foreground">|</span> {formatDateShort(group.date)} <span className="text-muted-foreground">{group.time}</span>
                         </div>
@@ -402,15 +402,15 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                   return (
                     <div key={doc.id} className={cn("bg-card rounded-2xl p-4 cursor-pointer transition-all shadow-soft", isSelected && "border-2 border-primary bg-sky-50/50")}>
                       <div className="flex gap-3 items-center">
-                        <div onClick={() => toggleSelect(doc.id)} className={cn("w-[30px] h-[30px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all", isSelected ? "bg-sky-500 border-sky-500 shadow-[0_2px_8px_rgba(14,165,233,0.3)]" : "bg-card border-muted-foreground/30")}>
+                        <div onClick={() => toggleSelect(doc.id)} className={cn("w-[20px] h-[20px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all", isSelected ? "bg-sky-500 border-sky-500 shadow-[0_2px_8px_rgba(14,165,233,0.3)]" : "bg-card border-muted-foreground/30")}>
                           {isSelected && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
                         </div>
-                        <div className="w-20 h-20 rounded-xl bg-muted border border-border overflow-hidden shrink-0 flex items-center justify-center">
+                        <div className="w-[70px] h-[70px] rounded-xl bg-muted border border-border overflow-hidden shrink-0 flex items-center justify-center">
                           {thumbUrl ? <img src={thumbUrl} alt="" className="w-full h-full object-cover" /> : <FileText className="w-8 h-8 text-muted-foreground" />}
                         </div>
-                        <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                        <div className="flex-1 min-w-0 flex flex-col gap-1.5 pt-0.5">
                           <div className="flex items-center gap-2.5 mb-1">
-                            <span className="text-[16px] font-[800] text-header-navy truncate">{doc.title}</span>
+                            <span className="text-[18px] font-[800] text-header-navy truncate mt-[3px]">{doc.title}</span>
                           </div>
                           <div className="flex items-center gap-1.5 text-[15px] font-medium text-text-sub mb-2">
                             <span className="font-semibold">{doc.author}</span>
@@ -442,13 +442,13 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
 
                 return (
                   <div key={doc.id} onClick={() => toggleSelect(doc.id)} className={cn("bg-card rounded-2xl p-4 cursor-pointer transition-all shadow-soft flex gap-3 items-center", isSelected && "border-2 border-primary bg-sky-50/50 shadow-[0_0_0_2px_rgba(49,163,250,0.1)]")}>
-                    <div className={cn("w-[30px] h-[30px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all", isSelected ? "bg-sky-500 border-sky-500 shadow-[0_2px_8px_rgba(14,165,233,0.3)]" : "bg-card border-muted-foreground/30")}>
+                    <div className={cn("w-[20px] h-[20px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all", isSelected ? "bg-sky-500 border-sky-500 shadow-[0_2px_8px_rgba(14,165,233,0.3)]" : "bg-card border-muted-foreground/30")}>
                       {isSelected && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
                     </div>
-                    <div className="w-20 h-20 rounded-xl bg-muted border border-border overflow-hidden shrink-0 flex items-center justify-center">
+                    <div className="w-[70px] h-[70px] rounded-xl bg-muted border border-border overflow-hidden shrink-0 flex items-center justify-center">
                       {thumbUrl ? <img src={thumbUrl} alt="" className="w-full h-full object-cover" /> : <FileText className="w-8 h-8 text-muted-foreground" />}
                     </div>
-                    <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                    <div className="flex-1 min-w-0 flex flex-col gap-1.5 pt-0.5">
                       {doc.contractor && (
                         <div className="flex gap-1.5 flex-wrap mb-1">
                           {doc.affiliation && <span className="text-[14px] px-3 py-0.5 rounded-lg bg-[#e0f2fe] text-[#0284c7] border border-[#bae6fd] font-semibold">{doc.affiliation}</span>}
@@ -458,7 +458,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                         <MapPin className="w-4 h-4 text-text-sub shrink-0" />
                         <span className="text-[15px] text-text-sub font-bold truncate">{doc.title}</span>
                       </div>
-                      <div className="text-[16px] font-[800] text-header-navy truncate">{doc.files[0]?.name || doc.title}</div>
+                      <div className="text-[16px] font-[800] text-header-navy truncate mt-0.5">{doc.files[0]?.name || doc.title}</div>
                       <div className="text-[15px] text-text-sub font-medium">
                         {formatDateShort(doc.date)} · {doc.files[0]?.size || ''}
                       </div>
