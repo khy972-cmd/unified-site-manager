@@ -65,7 +65,7 @@ export default function AppHeader({ onSearch, onCert, onNotify, onMenu, notifica
       </div>
 
       {/* Tab Navigation */}
-      <nav className="h-[54px] mb-3 border-t border-border/50 flex items-center gap-0 overflow-hidden px-1.5">
+      <nav className="h-[54px] border-t border-border/50 flex items-center gap-0 overflow-hidden px-1.5">
         {TABS.map((tab, i) => (
           <div key={tab.key} className="contents">
             {i === 5 && (
