@@ -101,7 +101,6 @@ const QUICK_ACTIONS: { id: string; label: string; to?: string; icon: LucideIcon;
   { id: "request", label: "본사요청", to: "/request", icon: Building2 },
 ];
 
-const SUGGESTED_KEYWORDS = ["작업일지", "현장", "문서", "출력", "확인서", "본사요청"];
 
 export default function SearchOverlay({ isOpen, onClose, onOpenCert }: SearchOverlayProps) {
   const [query, setQuery] = useState("");
@@ -268,7 +267,8 @@ export default function SearchOverlay({ isOpen, onClose, onOpenCert }: SearchOve
           onClick={performSearch}
           className="bg-transparent border-none text-primary font-bold text-base-app cursor-pointer whitespace-nowrap pl-3"
         >
-          寃??        </button>
+          검색
+        </button>
       </div>
 
       {/* Content */}
@@ -312,19 +312,6 @@ export default function SearchOverlay({ isOpen, onClose, onOpenCert }: SearchOve
                   </div>
                 ))
               )}
-            </div>
-
-            <span className="text-base-app font-bold text-text-sub block mb-3">추천 키워드</span>
-            <div className="flex flex-wrap gap-2 mb-6">
-              {SUGGESTED_KEYWORDS.map((term) => (
-                <button
-                  key={term}
-                  onClick={() => setSearchFromTag(term)}
-                  className="rounded-full border border-border bg-[hsl(var(--bg-input))] px-3 py-2 text-sm-app font-semibold text-foreground transition-colors hover:border-primary/40 hover:bg-primary/5"
-                >
-                  #{term}
-                </button>
-              ))}
             </div>
 
             {/* Quick Actions */}

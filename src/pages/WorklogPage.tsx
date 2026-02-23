@@ -95,12 +95,12 @@ function WorkerWorklogPage() {
   return (
     <div className="animate-fade-in">
       {/* Search */}
-      <div className="relative mt-[12px] mb-3">
+      <div className="relative mb-3 mt-1">
         <input
           value={search}
           onChange={e => setSearch(e.target.value)}
           placeholder="현장 또는 작업 내용 검색"
-          className="w-full h-[50px] bg-card border border-border rounded-xl px-4 pr-12 text-base-app font-medium text-foreground placeholder:text-muted-foreground transition-all focus:border-primary focus:shadow-input-focus outline-none"
+          className="w-full h-[50px] bg-card border border-border rounded-xl px-4 pr-12 text-base-app font-medium text-foreground placeholder:text-muted-foreground transition-all hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)] outline-none"
         />
         {search ? (
           <button onClick={() => setSearch("")} className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-muted flex items-center justify-center">
@@ -120,8 +120,8 @@ function WorkerWorklogPage() {
             className={cn(
               "h-10 px-3.5 rounded-full text-sm-app font-medium whitespace-nowrap flex-shrink-0 border transition-all cursor-pointer flex items-center gap-1.5",
               filter === f.key
-                ? "bg-header-navy text-header-navy-foreground border-transparent shadow-input-focus"
-                : "bg-card text-muted-foreground border-border hover:border-primary/50"
+                ? "bg-header-navy text-header-navy-foreground border-transparent shadow-none"
+                : "bg-card text-muted-foreground border-border hover:bg-muted/40 hover:border-border"
             )}
           >
             {f.label}

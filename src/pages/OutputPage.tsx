@@ -186,7 +186,7 @@ function WorkerOutputPage({ isAdmin }: { isAdmin: boolean }) {
 
       {/* OUTPUT TAB */}
       {activeTab === 'output' && (
-        <div className="animate-fade-in mt-3">
+        <div className="animate-fade-in mt-1">
           {/* Site Search + Month Filter */}
           <div className="flex items-center gap-3 max-[640px]:gap-2 mb-3">
             <div className="relative flex-1 min-w-0 md:min-w-[200px]">

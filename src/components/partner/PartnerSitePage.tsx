@@ -56,7 +56,7 @@ export default function PartnerSitePage() {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="현장 선택 또는 검색"
-            className="w-full h-[54px] bg-card border border-border rounded-xl px-4 pr-10 text-base-app font-medium text-foreground placeholder:text-muted-foreground outline-none transition-all focus:border-primary focus:shadow-input-focus"
+            className="w-full h-[50px] bg-card border border-border rounded-xl px-4 pr-10 text-base-app font-medium text-foreground placeholder:text-muted-foreground outline-none transition-all hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)]"
           />
           {search ? (
             <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2"><X className="w-4 h-4 text-muted-foreground" /></button>

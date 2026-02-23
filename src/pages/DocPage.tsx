@@ -268,7 +268,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
             onChange={e => { setSiteFilter(e.target.value); setShowSiteDropdown(true); }}
             onFocus={() => setShowSiteDropdown(true)}
             placeholder="현장 선택 또는 검색"
-            className="w-full h-[54px] bg-card border border-border rounded-2xl px-5 pr-16 text-base font-medium text-foreground placeholder:text-muted-foreground shadow-soft transition-all outline-none hover:border-primary/50 focus:shadow-[0_0_0_2px_hsl(var(--primary))] focus:border-transparent"
+            className="w-full h-[50px] bg-card border border-border rounded-2xl px-5 pr-16 text-base font-medium text-foreground placeholder:text-muted-foreground transition-all outline-none hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)]"
           />
           {siteFilter && (
             <button onClick={() => { setSiteFilter(''); setShowSiteDropdown(false); }} className="absolute right-12 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[12px] text-muted-foreground z-10">✕</button>
@@ -293,7 +293,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="현장명 검색..."
-            className="w-full h-[54px] bg-card border border-transparent rounded-2xl px-5 pr-12 text-base font-medium text-foreground placeholder:text-muted-foreground shadow-soft transition-all hover:bg-card hover:border-border focus:shadow-[0_0_0_2px_hsl(var(--primary))] focus:border-transparent outline-none"
+            className="w-full h-[50px] bg-card border border-border rounded-2xl px-5 pr-12 text-base font-medium text-foreground placeholder:text-muted-foreground transition-all hover:bg-card hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)] outline-none"
           />
           {search && (
             <button onClick={() => setSearch('')} className="absolute right-12 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[12px] text-muted-foreground z-10">✕</button>

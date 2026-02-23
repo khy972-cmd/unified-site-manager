@@ -106,7 +106,7 @@ export default function PartnerOutputPage() {
             onChange={e => { setFilterSite(e.target.value); setShowSiteDropdown(true); }}
             onFocus={() => setShowSiteDropdown(true)}
             placeholder="현장 선택 또는 검색"
-            className="w-full h-[54px] bg-card border border-border rounded-xl px-4 pr-12 text-[17px] font-medium text-foreground placeholder:text-muted-foreground outline-none transition-all hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)]"
+            className="w-full h-[50px] bg-card border border-border rounded-xl px-4 pr-12 text-[17px] font-medium text-foreground placeholder:text-muted-foreground outline-none transition-all hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)]"
           />
           {filterSite && (
             <button
