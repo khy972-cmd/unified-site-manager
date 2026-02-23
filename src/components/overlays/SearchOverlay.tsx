@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+﻿import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -27,17 +27,69 @@ interface SearchResult {
   desc: string;
   category: string;
   link?: string;
+  action?: "cert";
+  keywords?: string[];
 }
 
+const MAX_RECENT = 8;
+
 const APP_DATA: SearchResult[] = [
-  { id: "page_main", title: "홈", desc: "메인 페이지", category: "페이지", link: "/" },
-  { id: "page_money", title: "출력현황", desc: "급여/출력 관리", category: "페이지", link: "/output" },
-  { id: "page_worklog", title: "현장기록", desc: "작업일지 작성", category: "페이지", link: "/worklog" },
-  { id: "page_site", title: "현장정보", desc: "현장 관리", category: "페이지", link: "/site" },
-  { id: "page_doc", title: "문서함", desc: "내문서/회사서류/사진/도면", category: "페이지", link: "/doc" },
-  { id: "section_photos", title: "사진대지 관리", desc: "현장 사진 업로드 및 분류", category: "현장" },
-  { id: "section_drawings", title: "도면 마킹", desc: "실시간 도면 수정 사항 체크", category: "현장" },
-  { id: "section_cert", title: "작업완료확인서", desc: "관리자 승인 요청", category: "현장" },
+  {
+    id: "page_home",
+    title: "홈",
+    desc: "메인 대시보드 및 요약",
+    category: "페이지",
+    link: "/",
+    keywords: ["메인", "대시보드", "홈"],
+  },
+  {
+    id: "page_worklog",
+    title: "작업일지",
+    desc: "일지 작성 · 조회",
+    category: "페이지",
+    link: "/worklog",
+    keywords: ["일지", "작업", "근무", "기록"],
+  },
+  {
+    id: "page_site",
+    title: "현장정보",
+    desc: "현장 현황 · 관리",
+    category: "페이지",
+    link: "/site",
+    keywords: ["현장", "현장관리", "위치", "현황"],
+  },
+  {
+    id: "page_doc",
+    title: "문서함",
+    desc: "문서 업로드 · 조회",
+    category: "페이지",
+    link: "/doc",
+    keywords: ["문서", "서류", "파일", "도면"],
+  },
+  {
+    id: "page_output",
+    title: "출력현황",
+    desc: "기성 · 출력 현황",
+    category: "페이지",
+    link: "/output",
+    keywords: ["출력", "기성", "정산", "현황"],
+  },
+  {
+    id: "page_request",
+    title: "본사요청",
+    desc: "요청 · 공지 확인",
+    category: "페이지",
+    link: "/request",
+    keywords: ["요청", "공지", "본사"],
+  },
+  {
+    id: "action_cert",
+    title: "확인서",
+    desc: "작업완료 확인서 관리",
+    category: "바로가기",
+    action: "cert",
+    keywords: ["확인", "확인서", "완료", "검토"],
+  },
 ];
 
 const QUICK_ACTIONS: { id: string; label: string; to?: string; icon: LucideIcon; action?: "cert"; }[] = [
@@ -48,6 +100,8 @@ const QUICK_ACTIONS: { id: string; label: string; to?: string; icon: LucideIcon;
   { id: "cert", label: "확인서", icon: FileCheck, action: "cert" },
   { id: "request", label: "본사요청", to: "/request", icon: Building2 },
 ];
+
+const SUGGESTED_KEYWORDS = ["작업일지", "현장", "문서", "출력", "확인서", "본사요청"];
 
 export default function SearchOverlay({ isOpen, onClose, onOpenCert }: SearchOverlayProps) {
   const [query, setQuery] = useState("");
@@ -73,48 +127,79 @@ export default function SearchOverlay({ isOpen, onClose, onOpenCert }: SearchOve
   }, [isOpen]);
 
   const handleSearch = useCallback((q: string) => {
+    const term = q.trim();
     setQuery(q);
-    if (q.trim().length < 2) {
+    if (term.length < 2) {
       setShowResults(false);
+      setResults([]);
       return;
     }
     setShowResults(true);
-    const lower = q.toLowerCase();
-    const filtered = APP_DATA.filter(
-      item => item.title.toLowerCase().includes(lower) || item.desc.toLowerCase().includes(lower)
-    );
+    const needle = term.toLowerCase().replace(/\s+/g, "");
+    const filtered = APP_DATA.filter(item => {
+      const hay = [
+        item.title,
+        item.desc,
+        item.category,
+        ...(item.keywords ?? []),
+      ]
+        .join(" ")
+        .toLowerCase()
+        .replace(/\s+/g, "");
+      return hay.includes(needle);
+    });
     setResults(filtered);
   }, []);
 
-  const saveRecentSearch = (term: string) => {
-    if (term.trim().length < 2) return;
-    try {
-      let recent = JSON.parse(localStorage.getItem("INOPNC_RECENT_SEARCHES_v1") || "[]");
-      recent = recent.filter((r: string) => r !== term);
-      recent.unshift(term);
-      recent = recent.slice(0, 5);
-      localStorage.setItem("INOPNC_RECENT_SEARCHES_v1", JSON.stringify(recent));
-      setRecentSearches(recent);
-    } catch {}
-  };
+  const saveRecentSearch = useCallback((term: string) => {
+    const normalized = term.trim();
+    if (normalized.length < 2) return;
+    const buildNext = (list: string[]) => [
+      normalized,
+      ...list.filter((item) => item !== normalized),
+    ].slice(0, MAX_RECENT);
 
-  const removeRecentSearch = (term: string) => {
     try {
-      let recent = JSON.parse(localStorage.getItem("INOPNC_RECENT_SEARCHES_v1") || "[]");
-      recent = recent.filter((r: string) => r !== term);
-      localStorage.setItem("INOPNC_RECENT_SEARCHES_v1", JSON.stringify(recent));
-      setRecentSearches(recent);
-    } catch {}
-  };
+      const recent = JSON.parse(localStorage.getItem("INOPNC_RECENT_SEARCHES_v1") || "[]");
+      const next = buildNext(recent);
+      localStorage.setItem("INOPNC_RECENT_SEARCHES_v1", JSON.stringify(next));
+      setRecentSearches(next);
+    } catch {
+      setRecentSearches(prev => buildNext(prev));
+    }
+  }, []);
+
+  const removeRecentSearch = useCallback((term: string) => {
+    const removeFrom = (list: string[]) => list.filter((item) => item !== term);
+    try {
+      const recent = JSON.parse(localStorage.getItem("INOPNC_RECENT_SEARCHES_v1") || "[]");
+      const next = removeFrom(recent);
+      localStorage.setItem("INOPNC_RECENT_SEARCHES_v1", JSON.stringify(next));
+      setRecentSearches(next);
+    } catch {
+      setRecentSearches(prev => removeFrom(prev));
+    }
+  }, []);
+
+  const clearRecentSearches = useCallback(() => {
+    try {
+      localStorage.removeItem("INOPNC_RECENT_SEARCHES_v1");
+    } catch {
+      // ignore
+    }
+    setRecentSearches([]);
+  }, []);
 
   const performSearch = () => {
-    if (!query.trim()) return;
+    const term = query.trim();
+    if (term.length < 2) return;
     setVisibleCount(5);
-    saveRecentSearch(query.trim());
-    handleSearch(query);
+    saveRecentSearch(term);
+    handleSearch(term);
   };
 
   const setSearchFromTag = (term: string) => {
+    setVisibleCount(5);
     setQuery(term);
     handleSearch(term);
     saveRecentSearch(term);
@@ -122,11 +207,19 @@ export default function SearchOverlay({ isOpen, onClose, onOpenCert }: SearchOve
 
   const handleNavigate = useCallback((to?: string) => {
     if (!to) return;
+    const term = query.trim();
+    if (term.length >= 2) {
+      saveRecentSearch(term);
+    }
     onClose();
     navigate(to);
-  }, [navigate, onClose]);
+  }, [navigate, onClose, query, saveRecentSearch]);
 
   const handleQuickAction = useCallback((action: { to?: string; action?: "cert" }) => {
+    const term = query.trim();
+    if (term.length >= 2) {
+      saveRecentSearch(term);
+    }
     if (action.action === "cert") {
       if (onOpenCert) {
         onOpenCert();
@@ -137,7 +230,7 @@ export default function SearchOverlay({ isOpen, onClose, onOpenCert }: SearchOve
       return;
     }
     handleNavigate(action.to);
-  }, [handleNavigate, onClose, onOpenCert]);
+  }, [handleNavigate, onClose, onOpenCert, query, saveRecentSearch]);
 
   return (
     <div
@@ -175,8 +268,7 @@ export default function SearchOverlay({ isOpen, onClose, onOpenCert }: SearchOve
           onClick={performSearch}
           className="bg-transparent border-none text-primary font-bold text-base-app cursor-pointer whitespace-nowrap pl-3"
         >
-          검색
-        </button>
+          寃??        </button>
       </div>
 
       {/* Content */}
@@ -184,22 +276,36 @@ export default function SearchOverlay({ isOpen, onClose, onOpenCert }: SearchOve
         {!showResults ? (
           /* Default View - Recent Searches */
           <div>
-            <span className="text-base-app font-bold text-text-sub block mb-3">최근 검색어</span>
-            <div className="flex gap-2 flex-wrap mb-5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-base-app font-bold text-text-sub">최근 검색어</span>
+                <span className="text-xs text-muted-foreground">({recentSearches.length}/{MAX_RECENT})</span>
+              </div>
+              {recentSearches.length > 0 && (
+                <button
+                  onClick={clearRecentSearches}
+                  className="text-xs font-semibold text-muted-foreground hover:text-foreground"
+                >
+                  전체 삭제
+                </button>
+              )}
+            </div>
+            <div className="flex gap-2 flex-wrap mb-6">
               {recentSearches.length === 0 ? (
                 <div className="text-sm-app text-muted-foreground">최근 검색어가 없습니다.</div>
               ) : (
                 recentSearches.map((term) => (
-                  <div key={term} className="inline-flex items-center gap-1">
+                  <div key={term} className="inline-flex items-center gap-1 rounded-full bg-card/70 border border-border px-2.5 py-1.5">
                     <button
                       onClick={() => setSearchFromTag(term)}
-                      className="bg-card border border-border px-3.5 py-2 rounded-[20px] text-sm-app text-text-sub font-bold cursor-pointer transition-colors active:bg-background"
+                      className="text-sm-app text-foreground font-semibold"
                     >
                       {term}
                     </button>
                     <button
                       onClick={() => removeRecentSearch(term)}
-                      className="bg-muted-foreground/60 text-card border-none rounded-full w-5 h-5 flex items-center justify-center cursor-pointer"
+                      className="ml-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted text-muted-foreground hover:text-foreground"
+                      aria-label="최근 검색어 삭제"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -207,8 +313,22 @@ export default function SearchOverlay({ isOpen, onClose, onOpenCert }: SearchOve
                 ))
               )}
             </div>
+
+            <span className="text-base-app font-bold text-text-sub block mb-3">추천 키워드</span>
+            <div className="flex flex-wrap gap-2 mb-6">
+              {SUGGESTED_KEYWORDS.map((term) => (
+                <button
+                  key={term}
+                  onClick={() => setSearchFromTag(term)}
+                  className="rounded-full border border-border bg-[hsl(var(--bg-input))] px-3 py-2 text-sm-app font-semibold text-foreground transition-colors hover:border-primary/40 hover:bg-primary/5"
+                >
+                  #{term}
+                </button>
+              ))}
+            </div>
+
             {/* Quick Actions */}
-            <span className="text-base-app font-bold text-text-sub block mb-3">빠른 이동</span>
+            <span className="text-base-app font-bold text-text-sub block mb-3">바로가기</span>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
               {QUICK_ACTIONS.map((item) => {
                 const Icon = item.icon;
@@ -248,9 +368,13 @@ export default function SearchOverlay({ isOpen, onClose, onOpenCert }: SearchOve
                     key={item.id}
                     className="bg-card rounded-2xl p-5 mb-3.5 shadow-soft cursor-pointer transition-transform active:scale-[0.98]"
                     onClick={() => {
-                      if (item.id === "section_cert" && onOpenCert) {
-                        onOpenCert();
-                        onClose();
+                      if (item.action === "cert") {
+                        if (onOpenCert) {
+                          onOpenCert();
+                          onClose();
+                          return;
+                        }
+                        handleNavigate("/doc");
                         return;
                       }
                       if (item.link) {
@@ -280,7 +404,7 @@ export default function SearchOverlay({ isOpen, onClose, onOpenCert }: SearchOve
                     onClick={() => setVisibleCount(v => v >= results.length ? 5 : v + 5)}
                     className="w-full h-[50px] bg-card border border-border rounded-full text-text-sub font-semibold text-sm-app cursor-pointer flex items-center justify-center gap-1.5 mt-2.5 transition-colors active:bg-background"
                   >
-                    {visibleCount >= results.length ? "접기" : "더 보기"}
+                    {visibleCount >= results.length ? "?묎린" : "??蹂닿린"}
                     {visibleCount >= results.length ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                   </button>
                 )}
@@ -292,3 +416,10 @@ export default function SearchOverlay({ isOpen, onClose, onOpenCert }: SearchOve
     </div>
   );
 }
+
+
+
+
+
+
+

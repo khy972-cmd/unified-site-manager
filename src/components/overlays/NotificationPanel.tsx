@@ -198,7 +198,7 @@ export default function NotificationPanel({ isOpen, onClose, onBadgeUpdate }: No
       />
 
       <section
-        className={`fixed bottom-0 left-1/2 z-[2500] flex h-[70vh] w-full max-w-app -translate-x-1/2 flex-col overflow-hidden rounded-t-2xl border border-b-0 border-border bg-card shadow-2xl transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${
+        className={`fixed bottom-0 left-1/2 z-[2500] flex h-[70dvh] w-full max-w-app -translate-x-1/2 flex-col overflow-hidden rounded-t-2xl border border-b-0 border-border bg-card shadow-2xl transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${
           visible ? "translate-y-0" : "translate-y-full"
         }`}
       >
@@ -213,7 +213,7 @@ export default function NotificationPanel({ isOpen, onClose, onBadgeUpdate }: No
           </button>
         </header>
 
-        <div className="overflow-y-auto overscroll-contain px-4 py-3 pb-[calc(8px+env(safe-area-inset-bottom,0px))]">
+        <div className="overflow-y-auto overscroll-contain px-4 py-3 pb-[calc(16px+env(safe-area-inset-bottom,0px))]">
           {notifications.length > 0 ? (
             <div className="space-y-3">
               {notifications.map(notification => {
