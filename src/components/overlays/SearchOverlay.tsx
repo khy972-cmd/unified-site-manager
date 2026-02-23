@@ -1,9 +1,24 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { ArrowLeft, X, Search, ChevronDown, ChevronUp } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import type { LucideIcon } from "lucide-react";
+import {
+  ArrowLeft,
+  X,
+  Search,
+  ChevronDown,
+  ChevronUp,
+  ClipboardList,
+  MapPin,
+  FileText,
+  FolderOpen,
+  FileCheck,
+  Building2,
+} from "lucide-react";
 
 interface SearchOverlayProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenCert?: () => void;
 }
 
 interface SearchResult {
@@ -25,13 +40,23 @@ const APP_DATA: SearchResult[] = [
   { id: "section_cert", title: "작업완료확인서", desc: "관리자 승인 요청", category: "현장" },
 ];
 
-export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
+const QUICK_ACTIONS: { id: string; label: string; to?: string; icon: LucideIcon; action?: "cert"; }[] = [
+  { id: "worklog", label: "작업일지", to: "/worklog", icon: ClipboardList },
+  { id: "site", label: "현장정보", to: "/site", icon: MapPin },
+  { id: "doc", label: "문서함", to: "/doc", icon: FolderOpen },
+  { id: "output", label: "출력현황", to: "/output", icon: FileText },
+  { id: "cert", label: "확인서", icon: FileCheck, action: "cert" },
+  { id: "request", label: "본사요청", to: "/request", icon: Building2 },
+];
+
+export default function SearchOverlay({ isOpen, onClose, onOpenCert }: SearchOverlayProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [showResults, setShowResults] = useState(false);
   const [visibleCount, setVisibleCount] = useState(5);
   const inputRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (isOpen) {
@@ -94,6 +119,25 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
     handleSearch(term);
     saveRecentSearch(term);
   };
+
+  const handleNavigate = useCallback((to?: string) => {
+    if (!to) return;
+    onClose();
+    navigate(to);
+  }, [navigate, onClose]);
+
+  const handleQuickAction = useCallback((action: { to?: string; action?: "cert" }) => {
+    if (action.action === "cert") {
+      if (onOpenCert) {
+        onOpenCert();
+        onClose();
+        return;
+      }
+      handleNavigate("/doc");
+      return;
+    }
+    handleNavigate(action.to);
+  }, [handleNavigate, onClose, onOpenCert]);
 
   return (
     <div
@@ -165,29 +209,23 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
             </div>
             {/* Quick Actions */}
             <span className="text-base-app font-bold text-text-sub block mb-3">빠른 이동</span>
-            <div className="grid grid-cols-3 gap-2.5">
-              {[
-                { label: "작업일지", icon: "📋", highlight: true },
-                { label: "현장정보", icon: "📍" },
-                { label: "문서함", icon: "📁" },
-                { label: "출력현황", icon: "💰" },
-                { label: "확인서", icon: "✅", isCert: true },
-                { label: "본사요청", icon: "📨" },
-              ].map((item) => (
-                <button
-                  key={item.label}
-                  className={`h-[50px] flex items-center justify-center gap-1.5 rounded-xl border text-sm-app font-bold cursor-pointer transition-all active:scale-[0.98] ${
-                    item.highlight
-                      ? "text-primary border-primary/30 bg-[#f0f9ff]"
-                      : item.isCert
-                      ? "text-emerald-600 bg-emerald-50 border-emerald-300"
-                      : "text-text-sub bg-[hsl(var(--bg-input))] border-border"
-                  }`}
-                >
-                  <span>{item.icon}</span>
-                  {item.label}
-                </button>
-              ))}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              {QUICK_ACTIONS.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleQuickAction(item)}
+                    className="group h-[50px] w-full rounded-xl border border-border bg-[hsl(var(--bg-input))] px-3 flex items-center gap-2 text-sm-app font-semibold text-foreground transition-colors hover:border-primary/40 hover:bg-primary/5 active:scale-[0.98]"
+                  >
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-card border border-border text-muted-foreground group-hover:text-primary group-hover:border-primary/30">
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <span className="text-[15px] font-semibold text-foreground">{item.label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         ) : (
@@ -209,7 +247,18 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
                   <div
                     key={item.id}
                     className="bg-card rounded-2xl p-5 mb-3.5 shadow-soft cursor-pointer transition-transform active:scale-[0.98]"
-                    onClick={() => { onClose(); }}
+                    onClick={() => {
+                      if (item.id === "section_cert" && onOpenCert) {
+                        onOpenCert();
+                        onClose();
+                        return;
+                      }
+                      if (item.link) {
+                        handleNavigate(item.link);
+                        return;
+                      }
+                      onClose();
+                    }}
                   >
                     <div className="flex justify-between items-start">
                       <div className="flex-1 min-w-0">

@@ -57,7 +57,11 @@ export default function AppLayout() {
       </main>
 
       {/* Overlays */}
-      <SearchOverlay isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
+      <SearchOverlay
+        isOpen={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onOpenCert={() => setCertOpen(true)}
+      />
       <NotificationPanel
         isOpen={notifyOpen}
         onClose={() => setNotifyOpen(false)}
