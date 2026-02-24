@@ -16705,48 +16705,103 @@ const py = ['이현수', '김철수', '박영희', '정민수', '최지영'],
   hy = ['슬라브', '거더', '기둥', '기타'],
   my = ['균열', '면', '마감', '기타'],
   gy = ['지하', '지상', '지붕', '기타'],
+  /* TODO: TEMP PATCH - edit source and rebuild home-v2 assets; direct hash edit is temporary */
+  inopncRouteMap = {
+    home: '/',
+    output: '/output',
+    worklog: '/worklog',
+    site: '/site',
+    doc: '/doc',
+    request: '/request',
+  },
+  inopncAllowed = new Set(Object.values(inopncRouteMap)),
+  inopncIconBase = '/icons/quick-menu',
+  inopncIconMap = {
+    flash: `${inopncIconBase}/Flash.png`,
+    pay: 'https://github.com/khy972-cmd/unified-site-manager/blob/main/src/assets/icons/pay.png?raw=true',
+    photo: 'https://github.com/khy972-cmd/unified-site-manager/blob/main/src/assets/icons/photo.png?raw=true',
+    report: 'https://github.com/khy972-cmd/unified-site-manager/blob/main/src/assets/icons/worklog.png?raw=true',
+    map: 'https://github.com/khy972-cmd/unified-site-manager/blob/main/src/assets/icons/map.png?raw=true',
+    doc: 'https://github.com/khy972-cmd/unified-site-manager/blob/main/src/assets/icons/docs.png?raw=true',
+    request: 'https://github.com/khy972-cmd/unified-site-manager/blob/main/src/assets/icons/request.png?raw=true',
+  },
+  inopncIconDefault = inopncIconMap.doc,
+  inopncInlineFallback =
+    'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="46" height="46"><rect width="46" height="46" rx="10" fill="%23E2E8F0"/><path d="M14 14h18v18H14z" fill="%2394A3B8"/></svg>',
   nk = [
     {
       id: 1,
       label: '출력현황',
-      path: '/output',
-      icon: 'https://github.com/gpdavidyang/INOPNC_WM_20250829/raw/main/public/icons/doc.png?raw=true',
+      path: inopncRouteMap.output,
+      icon: inopncIconMap.pay,
     },
     {
       id: 2,
       label: '작업일지',
-      path: '/worklog',
+      path: inopncRouteMap.worklog,
       badge: 3,
       badgeColor: 'green',
-      icon: 'https://github.com/gpdavidyang/INOPNC_WM_20250829/raw/main/public/icons/report.png?raw=true',
+      icon: inopncIconMap.report,
     },
     {
       id: 3,
       label: '현장정보',
-      path: '/site',
-      icon: 'https://github.com/gpdavidyang/INOPNC_WM_20250829/raw/main/public/icons/map.png?raw=true',
+      path: inopncRouteMap.site,
+      icon: inopncIconMap.map,
     },
     {
       id: 4,
       label: '문서함',
-      path: '/doc',
-      icon: 'https://github.com/gpdavidyang/INOPNC_WM_20250829/raw/main/public/icons/doc.png?raw=true',
+      path: inopncRouteMap.doc,
+      icon: inopncIconMap.doc,
     },
     {
       id: 5,
       label: '본사요청',
-      path: '/request',
-      icon: 'https://github.com/gpdavidyang/INOPNC_WM_20250829/raw/main/public/icons/request.png?raw=true',
+      path: inopncRouteMap.request,
+      icon: inopncIconMap.request,
     },
     {
       id: 6,
       label: '조치사항',
-      path: '/doc',
+      path: inopncRouteMap.doc,
       badge: 0,
       badgeColor: 'red',
-      icon: 'https://github.com/gpdavidyang/INOPNC_WM_20250829/raw/main/public/icons/photo.png?raw=true',
+      icon: inopncIconMap.photo,
     },
   ]
+var inopncIsAllowedPath = function (e) {
+  return inopncAllowed.has(e)
+}
+var inopncNavigate = function (e) {
+  if (!inopncIsAllowedPath(e)) {
+    console.warn('[inopnc] blocked path', e)
+    return
+  }
+  let t = !1
+  try {
+    window.parent &&
+      window.parent !== window &&
+      (window.parent.postMessage({ type: 'inopnc:navigate', path: e }, window.location.origin), (t = !0))
+  } catch {}
+  if (!t)
+    try {
+      window.top && window.top !== window
+        ? window.top.location.assign(e)
+        : window.location.assign(e)
+    } catch {
+      window.location.assign(e)
+    }
+}
+var inopncValidateQuickMenuItem = function (e) {
+  inopncIsAllowedPath(e.path) || console.warn('[inopnc] invalid path', e.path)
+  e.icon || console.warn('[inopnc] missing icon', e.label)
+  typeof e.icon == 'string' &&
+    /^https?:\/\//.test(e.icon) &&
+    !e.icon.includes('github.com/khy972-cmd/unified-site-manager') &&
+    console.warn('[inopnc] external icon blocked', e.icon)
+}
+nk.forEach(inopncValidateQuickMenuItem)
 function yy() {
   return {
     selectedSite: '',
@@ -17119,13 +17174,7 @@ function mk() {
           {
             onClick: () => {
               const n = e.path || '/'
-              try {
-                window.top && window.top !== window
-                  ? window.top.location.assign(n)
-                  : window.location.assign(n)
-              } catch {
-                window.location.assign(n)
-              }
+              inopncNavigate(n)
             },
             className:
               'flex flex-col items-center gap-1.5 rounded-xl py-1.5 transition-transform hover:-translate-y-0.5 active:scale-95',
@@ -17150,6 +17199,15 @@ function mk() {
                     }),
                   c.jsx('img', {
                     src: e.icon,
+                    onError: t => {
+                      const n = t.currentTarget
+                      n.onerror = null
+                      if (n.src !== inopncIconDefault) {
+                        n.src = inopncIconDefault
+                        return
+                      }
+                      n.src = inopncInlineFallback
+                    },
                     alt: e.label,
                     className: 'h-[46px] w-[46px] object-contain drop-shadow-sm',
                   }),
@@ -20160,7 +20218,3 @@ const sp = () => c.jsx(pk, { children: c.jsx($k, {}) }),
       }),
     })
 Rm(document.getElementById('root')).render(c.jsx(Wk, {}))
-
-
-
-
