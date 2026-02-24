@@ -1,5 +1,6 @@
 ﻿import { useState, useMemo } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight, Calendar, Clock, FileText, Eye, EyeOff, Share, Download, X } from "lucide-react";
+import { useRef } from "react";
 import { cn } from "@/lib/utils";
 import { useWorklogs } from "@/hooks/useSupabaseWorklogs";
 import { useUserRole } from "@/hooks/useUserRole";
@@ -45,6 +46,10 @@ function WorkerOutputPage({ isAdmin }: { isAdmin: boolean }) {
   const [isPayStubOpen, setIsPayStubOpen] = useState(false);
   const [selectedPayStub, setSelectedPayStub] = useState<typeof SALARY_HISTORY[0] | null>(null);
   const [editModal, setEditModal] = useState<{ date: string; entries: { site: string; man: number; price: number; worker: string }[] } | null>(null);
+  const paystubRef = useRef<HTMLDivElement | null>(null);
+  // A4-sized offscreen paystub for PDF capture (keeps table layout consistent even on mobile viewport)
+  const paystubPdfRef = useRef<HTMLDivElement | null>(null);
+  const payRequestRef = useRef<HTMLDivElement | null>(null);
 
   // Live worklog data from Supabase
   const { data: worklogs = [] } = useWorklogs();
@@ -109,6 +114,30 @@ function WorkerOutputPage({ isAdmin }: { isAdmin: boolean }) {
     return { totalSites: sites.size, totalMan: totalMan.toFixed(1), workedDays };
   }, [calendarData]);
 
+  const shareTotals = useMemo(() => {
+    let totalMan = 0;
+    let totalPay = 0;
+    calendarData.cells.forEach(cell => {
+      cell.entries.forEach(e => {
+        totalMan += e.man;
+        totalPay += e.price;
+      });
+    });
+    const deduction = Math.floor(totalPay * 0.033);
+    const netPay = totalPay - deduction;
+    return { totalMan, totalPay, deduction, netPay };
+  }, [calendarData]);
+
+  const shareCalendarCells = useMemo(() => {
+    const daysInMonth = calendarData.cells.length;
+    const totalSlots = Math.ceil((calendarData.firstDay + daysInMonth) / 7) * 7;
+    return Array.from({ length: totalSlots }, (_, idx) => {
+      const day = idx - calendarData.firstDay + 1;
+      if (day < 1 || day > daysInMonth) return null;
+      return calendarData.cells[day - 1];
+    });
+  }, [calendarData]);
+
   const uniqueSites = useMemo(() => {
     const sites = new Set<string>();
     Object.values(workData).forEach(entries => entries.forEach(e => sites.add(e.site)));
@@ -149,6 +178,181 @@ function WorkerOutputPage({ isAdmin }: { isAdmin: boolean }) {
     setIsPayStubOpen(true);
   };
 
+  const loadScript = (src: string) =>
+    new Promise<void>((resolve, reject) => {
+      const existing = document.querySelector(`script[src="${src}"]`) as HTMLScriptElement | null;
+      if (existing) {
+        if (existing.dataset.loaded === 'true') {
+          resolve();
+          return;
+        }
+        existing.addEventListener('load', () => resolve(), { once: true });
+        existing.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)), { once: true });
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = src;
+      script.async = true;
+      script.onload = () => {
+        script.dataset.loaded = 'true';
+        resolve();
+      };
+      script.onerror = () => reject(new Error(`Failed to load ${src}`));
+      document.head.appendChild(script);
+    });
+
+  const ensureHtml2Canvas = async () => {
+    const w = window as typeof window & { html2canvas?: any };
+    if (!w.html2canvas) {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+    }
+  };
+
+  const handlePaymentRequest = async () => {
+    if (!payRequestRef.current) return;
+
+    try {
+      await ensureHtml2Canvas();
+      const w = window as typeof window & { html2canvas?: any };
+      const html2canvas = w.html2canvas;
+      if (!html2canvas) {
+        alert('공유 이미지를 위한 라이브러리가 로드되지 않았습니다.');
+        return;
+      }
+
+      const canvas = await html2canvas(payRequestRef.current, {
+        scale: 2,
+        backgroundColor: '#ffffff',
+        useCORS: true,
+      });
+
+      const blob: Blob | null = await new Promise(resolve => canvas.toBlob(resolve, 'image/png', 1));
+      if (!blob) {
+        alert('공유 이미지를 생성할 수 없습니다.');
+        return;
+      }
+
+      const monthKey = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+      const fileName = `급여지급요청서_${monthKey}.png`;
+      const file = new File([blob], fileName, { type: 'image/png' });
+
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          title: '급여 지급 요청서',
+          files: [file],
+        });
+        return;
+      }
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('공유용 이미지를 생성할 수 없습니다.');
+    }
+  };
+
+  const ensurePdfLibs = async () => {
+    const w = window as typeof window & { html2canvas?: any; jspdf?: any };
+    if (!w.html2canvas) {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+    }
+    if (!w.jspdf) {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    }
+  };
+
+  const downloadPayStubPDF = async () => {
+    const source = paystubPdfRef.current || paystubRef.current;
+    if (!source || !selectedPayStub) return;
+
+    try {
+      await ensurePdfLibs();
+      const w = window as typeof window & { html2canvas?: any; jspdf?: { jsPDF: any } };
+      const html2canvas = w.html2canvas;
+      const jsPDF = w.jspdf?.jsPDF;
+
+      if (!html2canvas || !jsPDF) {
+        alert('PDF 다운로드를 위한 라이브러리가 로드되지 않았습니다.');
+        return;
+      }
+
+      // html2canvas가 테이블 텍스트 베이스라인을 아래로 찍는 경우가 있어,
+      // 캡처용으로 DOM을 복제 + 스타일 보정 후 렌더링한다. (UI 영향 없음)
+      const temp = source.cloneNode(true) as HTMLElement;
+      temp.style.position = 'fixed';
+      temp.style.left = '0';
+      temp.style.top = '-10000px';
+      temp.style.width = `${(source as HTMLElement).offsetWidth || 794}px`;
+      temp.style.backgroundColor = '#ffffff';
+      // Variable font에서 baseline 이슈가 있는 경우가 있어 캡처용 폰트는 일반 폰트로 강제
+      temp.style.fontFamily = 'Arial, sans-serif';
+      temp.style.pointerEvents = 'none';
+
+      document.body.appendChild(temp);
+
+      try {
+        temp.querySelectorAll('td, th').forEach((node) => {
+          const el = node as HTMLElement;
+          el.style.verticalAlign = 'middle';
+          el.style.lineHeight = '1.5';
+          // 비대칭 패딩으로 텍스트가 하단에 붙는 현상 완화
+          el.style.paddingTop = '6px';
+          el.style.paddingBottom = '16px';
+          el.style.paddingLeft = '4px';
+          el.style.paddingRight = '4px';
+          el.style.whiteSpace = 'nowrap';
+          el.style.height = 'auto';
+          el.style.boxSizing = 'border-box';
+        });
+
+        // Capture the A4-layout DOM (or fallback to the on-screen paystub).
+        const canvas = await html2canvas(temp, {
+          scale: 2,
+          backgroundColor: '#ffffff',
+          useCORS: true,
+        });
+        const imgData = canvas.toDataURL('image/png');
+        const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+
+        // Fit the rendered image inside a single A4 page (no clipping).
+        const margin = 10; // mm
+        const maxW = pageWidth - margin * 2;
+        const maxH = pageHeight - margin * 2;
+
+        let renderW = maxW;
+        let renderH = (canvas.height * renderW) / canvas.width;
+        if (renderH > maxH) {
+          renderH = maxH;
+          renderW = (canvas.width * renderH) / canvas.height;
+        }
+
+        const x = (pageWidth - renderW) / 2;
+        const y = margin;
+        pdf.addImage(imgData, 'PNG', x, y, renderW, renderH);
+
+        pdf.save(`급여명세서_${selectedPayStub.rawDate}.pdf`);
+      } finally {
+        temp.remove();
+      }
+    } catch {
+      alert('PDF 생성 중 오류가 발생했습니다.');
+    }
+  };
+
+  const paystubGross = selectedPayStub?.grossPay ?? selectedPayStub?.baseTotal ?? 0;
+  const paystubDeductions =
+    selectedPayStub?.deductions ??
+    (selectedPayStub?.netPay != null ? Math.max(0, paystubGross - selectedPayStub.netPay) : Math.floor(paystubGross * 0.033));
+  const paystubNet = selectedPayStub?.netPay ?? Math.max(0, paystubGross - paystubDeductions);
+
   return (
     <div className="animate-fade-in">
       {/* Tab Navigation */}
@@ -156,8 +360,8 @@ function WorkerOutputPage({ isAdmin }: { isAdmin: boolean }) {
         <button
           onClick={() => setActiveTab('output')}
           className={cn(
-            "flex-1 min-w-0 h-12 bg-transparent border-none text-[16px] font-bold cursor-pointer border-b-[3px] transition-all whitespace-nowrap px-1",
-            activeTab === 'output' ? "text-primary border-b-primary font-[800]" : "text-text-sub border-b-transparent"
+            "flex-1 min-w-0 h-12 bg-transparent border-none text-[16px] font-semibold cursor-pointer border-b-[3px] transition-all whitespace-nowrap px-1",
+            activeTab === 'output' ? "text-primary border-b-primary font-bold" : "text-text-sub border-b-transparent"
           )}
         >
           출력현황
@@ -165,8 +369,8 @@ function WorkerOutputPage({ isAdmin }: { isAdmin: boolean }) {
         <button
           onClick={() => setActiveTab('salary')}
           className={cn(
-            "flex-1 min-w-0 h-12 bg-transparent border-none text-[16px] font-bold cursor-pointer border-b-[3px] transition-all whitespace-nowrap px-1",
-            activeTab === 'salary' ? "text-primary border-b-primary font-[800]" : "text-text-sub border-b-transparent"
+            "flex-1 min-w-0 h-12 bg-transparent border-none text-[16px] font-semibold cursor-pointer border-b-[3px] transition-all whitespace-nowrap px-1",
+            activeTab === 'salary' ? "text-primary border-b-primary font-bold" : "text-text-sub border-b-transparent"
           )}
         >
           급여현황
@@ -175,8 +379,8 @@ function WorkerOutputPage({ isAdmin }: { isAdmin: boolean }) {
           <button
             onClick={() => setActiveTab('admin')}
             className={cn(
-              "flex-1 min-w-0 h-12 bg-transparent border-none text-[16px] font-bold cursor-pointer border-b-[3px] transition-all whitespace-nowrap px-1",
-              activeTab === 'admin' ? "text-primary border-b-primary font-[800]" : "text-text-sub border-b-transparent"
+              "flex-1 min-w-0 h-12 bg-transparent border-none text-[16px] font-semibold cursor-pointer border-b-[3px] transition-all whitespace-nowrap px-1",
+              activeTab === 'admin' ? "text-primary border-b-primary font-bold" : "text-text-sub border-b-transparent"
             )}
           >
             관리자
@@ -363,7 +567,9 @@ function WorkerOutputPage({ isAdmin }: { isAdmin: boolean }) {
           {/* Current Salary Card */}
           <div className="bg-card shadow-sm rounded-2xl p-6 mb-4 border border-border">
             <div className="flex justify-between items-center mb-2">
-              <span className="text-lg-app font-[800] text-foreground">{currentYear}년 {currentMonth}월</span>
+              <span className="text-lg-app font-[800] text-foreground" style={{ fontSize: 18 }}>
+                {currentYear}년 {currentMonth}월
+              </span>
               <span className="text-[13px] font-semibold px-2.5 py-1 rounded-full border bg-[#f0f9ff] text-[#0284c7] border-[#7dd3fc]">지급대기</span>
             </div>
 
@@ -382,11 +588,14 @@ function WorkerOutputPage({ isAdmin }: { isAdmin: boolean }) {
               <span className="font-semibold text-foreground text-[16px]">{currentSalary.man.toFixed(1)}</span>
             </div>
             <div className="flex justify-between items-center mb-2 text-[15px]">
-              <span className="font-bold text-foreground shrink-0">평균단가</span>
-              <span className="font-semibold text-foreground text-[16px]">{isPrivacyOn ? '****' : formatCurrency(currentSalary.price)}</span>
+              <span className="font-bold text-foreground shrink-0">일당(3.3%공제)</span>
+              <span className="font-semibold text-foreground text-[16px]">{isPrivacyOn ? '****' : `${formatCurrency(currentSalary.price)}원`}</span>
             </div>
 
-            <button className="w-full mt-4 p-3 rounded-[10px] bg-header-navy text-white font-bold text-base-app cursor-pointer flex items-center justify-center gap-2 border-none transition-all active:scale-[0.98]">
+            <button
+              onClick={handlePaymentRequest}
+              className="w-full mt-4 h-[50px] rounded-[10px] bg-header-navy text-white font-bold text-base-app cursor-pointer flex items-center justify-center gap-2 border-none transition-all active:scale-[0.98]"
+            >
               <Share className="w-[18px] h-[18px]" />
               지급 요청하기 (공유)
             </button>
@@ -465,18 +674,20 @@ function WorkerOutputPage({ isAdmin }: { isAdmin: boolean }) {
                 className="bg-card shadow-soft rounded-2xl p-5 cursor-pointer transition-all hover:shadow-md active:scale-[0.99] border border-border"
               >
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-lg-app font-[800] text-foreground">{sal.month}</span>
+                  <span className="text-lg-app font-[800] text-foreground" style={{ fontSize: 18 }}>
+                    {sal.month}
+                  </span>
                   <span className="text-[13px] font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-300">지급완료</span>
                 </div>
                 <div className="flex justify-between items-center pb-3 border-b border-dashed border-border mb-2">
                   <span className="font-bold text-foreground">실수령액</span>
                   <span className="text-[20px] font-[800] text-primary tracking-tight">
-                    {isPrivacyOn ? '****' : `₩${formatCurrency(sal.netPay)}`}
+                    {isPrivacyOn ? '****' : `${formatCurrency(sal.netPay)}원`}
                   </span>
                 </div>
                 <div className="flex justify-between text-[15px] text-text-sub">
                   <span>공수 <strong className="text-foreground">{sal.man.toFixed(1)}</strong></span>
-                  <span>총액 <strong className="text-foreground">{isPrivacyOn ? '****' : `₩${formatCurrency(sal.baseTotal)}`}</strong></span>
+                  <span>총액 <strong className="text-foreground">{isPrivacyOn ? '****' : `${formatCurrency(sal.baseTotal)}원`}</strong></span>
                 </div>
               </div>
             ))}
@@ -532,8 +743,8 @@ function WorkerOutputPage({ isAdmin }: { isAdmin: boolean }) {
             <span className="text-lg-app font-bold text-foreground">급여명세서 조회</span>
             <div className="w-6" />
           </div>
-          <div className="flex-1 p-5 pb-10 overflow-y-auto">
-            <div className="w-full max-w-[500px] bg-white rounded-2xl shadow-lg p-10 text-[#111] mx-auto">
+          <div className="flex-1 p-5 max-[640px]:p-3 pb-10 overflow-y-auto">
+            <div ref={paystubRef} className="w-full max-w-[500px] bg-white rounded-2xl shadow-lg p-10 max-[640px]:p-6 text-[#111] mx-auto">
               <div className="flex justify-between items-end border-b-2 border-header-navy pb-5 mb-8">
                 <div>
                   <h2 className="text-[32px] font-[800] text-header-navy tracking-tight leading-tight m-0">급여명세서</h2>
@@ -562,21 +773,297 @@ function WorkerOutputPage({ isAdmin }: { isAdmin: boolean }) {
                 </tbody>
               </table>
 
+              <table className="w-full border-collapse mb-0 border-t border-header-navy">
+                <tbody>
+                  <tr>
+                    <th colSpan={2} className="bg-header-navy text-white text-[14px] font-bold text-center p-2 border border-[#556080] border-b-0">지급내역</th>
+                    <th colSpan={2} className="bg-header-navy text-white text-[14px] font-bold text-center p-2 border border-[#556080] border-b-0">공제내역</th>
+                  </tr>
+                  <tr>
+                    <td className="bg-[#e0f2fe] text-header-navy font-bold text-[14px] text-center p-2 border border-[#d1d5db]">항목</td>
+                    <td className="bg-[#e0f2fe] text-header-navy font-bold text-[14px] text-center p-2 border border-[#d1d5db]">금액</td>
+                    <td className="bg-[#e0f2fe] text-header-navy font-bold text-[14px] text-center p-2 border border-[#d1d5db]">항목</td>
+                    <td className="bg-[#e0f2fe] text-header-navy font-bold text-[14px] text-center p-2 border border-[#d1d5db]">금액</td>
+                  </tr>
+                  <tr>
+                    <td className="p-2 border border-[#d1d5db] text-[14px]">기본급</td>
+                    <td className="p-2 border border-[#d1d5db] text-[14px] text-right font-medium">₩{formatCurrency(paystubGross)}</td>
+                    <td className="p-2 border border-[#d1d5db] text-[14px]">공제합계</td>
+                    <td className="p-2 border border-[#d1d5db] text-[14px] text-right font-medium">₩{formatCurrency(paystubDeductions)}</td>
+                  </tr>
+                  <tr className="bg-[#f8fafc] font-[800]">
+                    <td className="p-2 border border-[#d1d5db] text-[14px]">지급합계</td>
+                    <td className="p-2 border border-[#d1d5db] text-[14px] text-right">₩{formatCurrency(paystubGross)}</td>
+                    <td className="p-2 border border-[#d1d5db] text-[14px]">공제합계</td>
+                    <td className="p-2 border border-[#d1d5db] text-[14px] text-right">₩{formatCurrency(paystubDeductions)}</td>
+                  </tr>
+                </tbody>
+              </table>
+
               <div className="mt-5 bg-[#eff6ff] rounded-2xl p-6 flex justify-between items-center">
                 <span className="text-[16px] font-bold text-header-navy">실수령액</span>
-                <span className="text-[28px] font-[800] text-[#2563eb]">₩{formatCurrency(selectedPayStub.netPay)}</span>
+                <span className="text-[28px] font-[800] text-[#2563eb]">₩{formatCurrency(paystubNet)}</span>
               </div>
+
+              {/* 급여 산정 기준표: 모바일에서 잘림 방지 (카드형) */}
+              <div className="mt-5 sm:hidden">
+                <div className="border border-[#d1d5db] rounded-2xl overflow-hidden">
+                  <div className="bg-header-navy text-white text-[14px] font-bold text-center py-2">급여 산정 기준</div>
+                  <div className="divide-y divide-[#e5e7eb]">
+                    <div className="flex justify-between items-center px-4 py-3 text-[13px]">
+                      <span className="font-bold text-[#334155]">공수</span>
+                      <span className="font-semibold text-[#111]">{selectedPayStub.man.toFixed(1)}</span>
+                    </div>
+                    <div className="flex justify-between items-center px-4 py-3 text-[13px]">
+                      <span className="font-bold text-[#334155]">단가</span>
+                      <span className="font-semibold text-[#111]">₩{formatCurrency(selectedPayStub.price)}</span>
+                    </div>
+                    <div className="flex justify-between items-center px-4 py-3 text-[13px]">
+                      <span className="font-bold text-[#334155]">총액</span>
+                      <span className="font-semibold text-[#111]">₩{formatCurrency(paystubGross)}</span>
+                    </div>
+                    <div className="flex justify-between items-center px-4 py-3 text-[13px]">
+                      <span className="font-bold text-[#334155]">공제</span>
+                      <span className="font-semibold text-[#ef4444]">-₩{formatCurrency(paystubDeductions)}</span>
+                    </div>
+                    <div className="flex justify-between items-center px-4 py-3 text-[13px] bg-[#eff6ff]">
+                      <span className="font-bold text-header-navy">실수령</span>
+                      <span className="font-[800] text-[#2563eb]">₩{formatCurrency(paystubNet)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tablet/Desktop: 표 형태 */}
+              <table className="hidden sm:table w-full border-collapse mt-5">
+                <tbody>
+                  <tr className="bg-header-navy text-white font-bold text-[14px]">
+                    <td colSpan={5} className="p-2 text-center">급여 산정 기준</td>
+                  </tr>
+                  <tr>
+                    <th className="bg-header-navy text-white text-[13px] p-2 border border-[#556080] text-center">공수</th>
+                    <th className="bg-header-navy text-white text-[13px] p-2 border border-[#556080] text-center">단가</th>
+                    <th className="bg-header-navy text-white text-[13px] p-2 border border-[#556080] text-center">총액</th>
+                    <th className="bg-header-navy text-white text-[13px] p-2 border border-[#556080] text-center">공제</th>
+                    <th className="bg-header-navy text-white text-[13px] p-2 border border-[#556080] text-center">실수령</th>
+                  </tr>
+                  <tr>
+                    <td className="p-2 border border-[#d1d5db] text-[13px] text-center">{selectedPayStub.man.toFixed(1)}</td>
+                    <td className="p-2 border border-[#d1d5db] text-[13px] text-center">₩{formatCurrency(selectedPayStub.price)}</td>
+                    <td className="p-2 border border-[#d1d5db] text-[13px] text-center">₩{formatCurrency(paystubGross)}</td>
+                    <td className="p-2 border border-[#d1d5db] text-[13px] text-center">₩{formatCurrency(paystubDeductions)}</td>
+                    <td className="p-2 border border-[#d1d5db] text-[13px] text-center">₩{formatCurrency(paystubNet)}</td>
+                  </tr>
+                </tbody>
+              </table>
 
               <p className="mt-6 text-center text-[14px] text-[#64748b] font-medium">본 명세서는 참고용이며, 실제 지급액과 차이가 있을 수 있습니다.</p>
             </div>
 
-            <button className="mt-4 w-full max-w-[500px] mx-auto bg-header-navy text-white text-base-app font-bold rounded-xl h-14 border-none flex items-center justify-center gap-2 cursor-pointer transition-transform active:scale-95 shadow-lg">
+            <button
+              onClick={downloadPayStubPDF}
+              className="mt-4 w-full max-w-[500px] mx-auto bg-header-navy text-white text-base-app font-bold rounded-xl h-14 border-none flex items-center justify-center gap-2 cursor-pointer transition-transform active:scale-95 shadow-lg"
+            >
               <Download className="w-5 h-5" />
               PDF 다운로드
             </button>
+
+            {/* A4 PayStub (PDF 전용 캡처용) */}
+            <div
+              ref={paystubPdfRef}
+              className="fixed left-[-10000px] top-0 w-[794px] bg-white text-[#111]"
+              style={{ fontFamily: "Pretendard Variable, Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif" }}
+            >
+              <div className="p-[56px]">
+                <div className="flex justify-between items-end border-b-2 border-header-navy pb-6 mb-8">
+                  <div>
+                    <h2 className="text-[36px] font-[800] text-header-navy tracking-tight leading-tight m-0">급여명세서</h2>
+                    <span className="text-[24px] font-bold text-header-navy">{selectedPayStub.month}</span>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[16px] font-bold text-[#111]">이노피앤씨</div>
+                    <div className="text-[14px] text-[#64748b] font-medium">{selectedPayStub.rawDate}-25 발급</div>
+                  </div>
+                </div>
+
+                <table className="w-full border-collapse mb-6 border border-[#d1d5db]">
+                  <tbody>
+                    <tr>
+                      <th className="bg-[#f8fafc] text-header-navy font-bold text-[14px] p-2 border border-[#d1d5db] w-1/4 text-center">성명</th>
+                      <td className="font-medium text-[14px] p-2 border border-[#d1d5db] text-center">이현수</td>
+                      <th className="bg-[#f8fafc] text-header-navy font-bold text-[14px] p-2 border border-[#d1d5db] w-1/4 text-center">소속</th>
+                      <td className="font-medium text-[14px] p-2 border border-[#d1d5db] text-center">이노피앤씨</td>
+                    </tr>
+                    <tr>
+                      <th className="bg-[#f8fafc] text-header-navy font-bold text-[14px] p-2 border border-[#d1d5db] w-1/4 text-center">공수</th>
+                      <td className="font-medium text-[14px] p-2 border border-[#d1d5db] text-center">{selectedPayStub.man.toFixed(1)}</td>
+                      <th className="bg-[#f8fafc] text-header-navy font-bold text-[14px] p-2 border border-[#d1d5db] w-1/4 text-center">단가</th>
+                      <td className="font-medium text-[14px] p-2 border border-[#d1d5db] text-center">₩{formatCurrency(selectedPayStub.price)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <table className="w-full border-collapse mb-0 border-t border-header-navy">
+                  <tbody>
+                    <tr>
+                      <th colSpan={2} className="bg-header-navy text-white text-[14px] font-bold text-center p-2 border border-[#556080] border-b-0">지급내역</th>
+                      <th colSpan={2} className="bg-header-navy text-white text-[14px] font-bold text-center p-2 border border-[#556080] border-b-0">공제내역</th>
+                    </tr>
+                    <tr>
+                      <td className="bg-[#e0f2fe] text-header-navy font-bold text-[14px] text-center p-2 border border-[#d1d5db]">항목</td>
+                      <td className="bg-[#e0f2fe] text-header-navy font-bold text-[14px] text-center p-2 border border-[#d1d5db]">금액</td>
+                      <td className="bg-[#e0f2fe] text-header-navy font-bold text-[14px] text-center p-2 border border-[#d1d5db]">항목</td>
+                      <td className="bg-[#e0f2fe] text-header-navy font-bold text-[14px] text-center p-2 border border-[#d1d5db]">금액</td>
+                    </tr>
+                    <tr>
+                      <td className="p-2 border border-[#d1d5db] text-[14px]">기본급</td>
+                      <td className="p-2 border border-[#d1d5db] text-[14px] text-right font-medium">₩{formatCurrency(paystubGross)}</td>
+                      <td className="p-2 border border-[#d1d5db] text-[14px]">공제합계</td>
+                      <td className="p-2 border border-[#d1d5db] text-[14px] text-right font-medium">₩{formatCurrency(paystubDeductions)}</td>
+                    </tr>
+                    <tr className="bg-[#f8fafc] font-[800]">
+                      <td className="p-2 border border-[#d1d5db] text-[14px]">지급합계</td>
+                      <td className="p-2 border border-[#d1d5db] text-[14px] text-right">₩{formatCurrency(paystubGross)}</td>
+                      <td className="p-2 border border-[#d1d5db] text-[14px]">공제합계</td>
+                      <td className="p-2 border border-[#d1d5db] text-[14px] text-right">₩{formatCurrency(paystubDeductions)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <div className="mt-6 bg-[#eff6ff] rounded-2xl p-6 flex justify-between items-center">
+                  <span className="text-[16px] font-bold text-header-navy">실수령액</span>
+                  <span className="text-[28px] font-[800] text-[#2563eb]">₩{formatCurrency(paystubNet)}</span>
+                </div>
+
+                <table className="w-full border-collapse mt-6">
+                  <tbody>
+                    <tr className="bg-header-navy text-white font-bold text-[14px]">
+                      <td colSpan={5} className="p-2 text-center">급여 산정 기준</td>
+                    </tr>
+                    <tr>
+                      <th className="bg-header-navy text-white text-[13px] p-2 border border-[#556080] text-center">공수</th>
+                      <th className="bg-header-navy text-white text-[13px] p-2 border border-[#556080] text-center">단가</th>
+                      <th className="bg-header-navy text-white text-[13px] p-2 border border-[#556080] text-center">총액</th>
+                      <th className="bg-header-navy text-white text-[13px] p-2 border border-[#556080] text-center">공제</th>
+                      <th className="bg-header-navy text-white text-[13px] p-2 border border-[#556080] text-center">실수령</th>
+                    </tr>
+                    <tr>
+                      <td className="p-2 border border-[#d1d5db] text-[13px] text-center">{selectedPayStub.man.toFixed(1)}</td>
+                      <td className="p-2 border border-[#d1d5db] text-[13px] text-center">₩{formatCurrency(selectedPayStub.price)}</td>
+                      <td className="p-2 border border-[#d1d5db] text-[13px] text-center">₩{formatCurrency(paystubGross)}</td>
+                      <td className="p-2 border border-[#d1d5db] text-[13px] text-center">₩{formatCurrency(paystubDeductions)}</td>
+                      <td className="p-2 border border-[#d1d5db] text-[13px] text-center">₩{formatCurrency(paystubNet)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <p className="mt-8 text-center text-[14px] text-[#64748b] font-medium">본 명세서는 참고용이며, 실제 지급액과 차이가 있을 수 있습니다.</p>
+              </div>
+            </div>
           </div>
         </div>
       )}
+
+      {/* Pay Request Share Sheet (A4, hidden offscreen) */}
+      <div
+        ref={payRequestRef}
+        className="fixed left-[-10000px] top-0 w-[794px] min-h-[1123px] bg-white text-[#0f172a]"
+        style={{ fontFamily: "Pretendard Variable, Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif" }}
+      >
+        <div className="p-[56px]">
+          <div className="text-[36px] font-[800] text-[#1e2a57]">급여 지급 요청서</div>
+          <div className="mt-2 text-[24px] font-[700] text-[#64748b]">{currentYear}년 {currentMonth}월</div>
+          <div className="mt-4 h-[2px] bg-[#1e2a57]" />
+
+          <div className="mt-8 flex justify-between items-start">
+            <div />
+            <div className="text-right">
+              <div className="text-[18px] font-[700] text-[#64748b]">실수령 예정액</div>
+              <div className="mt-2 text-[42px] font-[800] text-[#3b82f6]">{formatCurrency(shareTotals.netPay)}원</div>
+            </div>
+          </div>
+
+          <div className="mt-6 rounded-[22px] bg-[#f8fafc] p-6 border border-[#e2e8f0]">
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <div className="text-[16px] font-[700] text-[#64748b]">총 공수</div>
+                <div className="mt-2 text-[28px] font-[800] text-[#0f172a]">{shareTotals.totalMan.toFixed(1)} 공수</div>
+              </div>
+              <div>
+                <div className="text-[16px] font-[700] text-[#64748b]">총 지급액</div>
+                <div className="mt-2 text-[28px] font-[800] text-[#0f172a]">{formatCurrency(shareTotals.totalPay)}원</div>
+              </div>
+            </div>
+            <div className="mt-4 border-t border-dashed border-[#cbd5e1]" />
+            <div className="mt-4 flex justify-between items-center text-[18px] font-[700] text-[#64748b]">
+              <span>공제금액 (3.3%)</span>
+              <span className="text-[#ef4444]">-{formatCurrency(shareTotals.deduction)}원</span>
+            </div>
+          </div>
+
+          <div className="mt-8 rounded-[24px] border border-[#e2e8f0] overflow-hidden">
+            <div className="grid grid-cols-7 bg-[#f8fafc] text-center text-[16px] font-[700] text-[#334155]">
+              {['일', '월', '화', '수', '목', '금', '토'].map((d, i) => (
+                <div
+                  key={d}
+                  className={cn(
+                    "py-3 border-b border-r border-[#e2e8f0]",
+                    i === 0 ? "text-[#ef4444]" : i === 6 ? "text-[#2563eb]" : "text-[#334155]",
+                    i === 6 && "border-r-0"
+                  )}
+                >
+                  {d}
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7">
+              {shareCalendarCells.map((cell, idx) => {
+                if (!cell) {
+                  return (
+                    <div
+                      key={`empty-${idx}`}
+                      className={cn(
+                        "h-[90px] border-b border-r border-[#e2e8f0]",
+                        (idx + 1) % 7 === 0 && "border-r-0"
+                      )}
+                    />
+                  );
+                }
+
+                const totalMan = cell.entries.reduce((s, e) => s + e.man, 0);
+                const totalPay = cell.entries.reduce((s, e) => s + e.price, 0);
+                let siteLabel = '';
+                if (cell.entries.length > 0) {
+                  const base = cell.entries[0].site.replace(/\s+/g, '');
+                  const shortName = base.slice(0, 4);
+                  siteLabel = cell.entries.length > 1 ? `${shortName}외${cell.entries.length - 1}` : shortName;
+                }
+
+                return (
+                  <div
+                    key={`day-${cell.day}`}
+                    className={cn(
+                      "h-[90px] border-b border-r border-[#e2e8f0] p-2 text-[#0f172a]",
+                      (idx + 1) % 7 === 0 && "border-r-0"
+                    )}
+                  >
+                    <div className="text-[16px] font-[700]">{cell.day}</div>
+                    {cell.entries.length > 0 && (
+                      <div className="mt-1 text-[12px] text-[#64748b] leading-tight">
+                        <div className="font-[700] text-[#0f172a]">{totalMan.toFixed(1)}공수</div>
+                        <div className="font-[800] text-[#2563eb]">{(totalPay / 10000).toFixed(0)}만</div>
+                        <div className="truncate">{siteLabel}</div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mt-10 text-center text-[#94a3b8] text-[14px] font-[600]">Generated by INOPNC App</div>
+        </div>
+      </div>
     </div>
   );
 }

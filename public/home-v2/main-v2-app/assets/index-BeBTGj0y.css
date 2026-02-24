@@ -827,6 +827,9 @@ body {
 .min-h-screen {
   min-height: 100vh;
 }
+.top-\[114px\] {
+  top: 114px;
+}
 .min-h-svh {
   min-height: 100svh;
 }

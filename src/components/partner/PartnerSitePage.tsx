@@ -93,7 +93,7 @@ export default function PartnerSitePage() {
             const st = STATUS_CONFIG[site.status];
             return (
               <div key={site.id} className={cn("bg-card rounded-2xl shadow-soft overflow-hidden", site.pinned && "border-2 border-primary")}>
-                <span className={cn("text-[13px] font-bold px-3.5 py-1.5 text-white rounded-bl-xl", st.cls)} style={{ float: "right" }}>{st.label}</span>
+                <span className={cn("text-[11px] font-bold px-3 py-1 text-white rounded-bl-xl", st.cls)} style={{ float: "right" }}>{st.label}</span>
                 <div className="p-5 border-b border-border">
                   <div className="text-[15px] text-text-sub font-medium mb-1">{site.lastDate}</div>
                   <div className="text-[20px] font-[800] text-header-navy mb-3 w-[85%]">{site.name}</div>

@@ -9887,14 +9887,7 @@ const bf = e => (typeof e == 'boolean' ? `${e}` : e === 0 ? '0' : e),
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
- */ const s1 = ie('GripHorizontal', [
-  ['circle', { cx: '12', cy: '9', r: '1', key: '124mty' }],
-  ['circle', { cx: '19', cy: '9', r: '1', key: '1ruzo2' }],
-  ['circle', { cx: '5', cy: '9', r: '1', key: '1a8b28' }],
-  ['circle', { cx: '12', cy: '15', r: '1', key: '1e56xg' }],
-  ['circle', { cx: '19', cy: '15', r: '1', key: '1a92ep' }],
-  ['circle', { cx: '5', cy: '15', r: '1', key: '5r1jwy' }],
-])
+ */ const s1 = ie('GripHorizontal', [['path', { d: 'M5 12h14', key: '1b2k89' }]])
 /**
  * @license lucide-react v0.462.0 - ISC
  *
@@ -17139,6 +17132,7 @@ function mk() {
             children: [
               c.jsxs('div', {
                 className: 'relative inline-block',
+                style: { marginTop: '-2px' },
                 children: [
                   (e.id === 2 ? t0 : e.badge) !== void 0 &&
                     (e.id === 2 ? t0 : e.badge) > 0 &&
@@ -17791,8 +17785,8 @@ function kk() {
           c.jsx('button', {
             onClick: k,
             className:
-              'flex h-12 w-12 items-center justify-center rounded-xl bg-primary-bg text-lg font-black text-primary hover:bg-primary/20',
-            children: '+',
+              'flex h-12 w-12 items-center justify-center rounded-xl bg-primary-bg text-[15px] font-black text-primary hover:bg-primary/20',
+            children: '저장',
           }),
         ],
       }),
@@ -17912,6 +17906,8 @@ const Kt = {
     pink: 'rgb(236, 72, 153)',
     cyan: 'rgb(6, 182, 212)',
     lime: 'rgb(132, 204, 22)',
+    indigo: 'rgb(99, 102, 241)',
+    teal: 'rgb(20, 184, 166)',
   },
   Oa = {
     blue: 'rgba(49, 163, 250, 0.3)',
@@ -17924,6 +17920,8 @@ const Kt = {
     pink: 'rgba(236, 72, 153, 0.3)',
     cyan: 'rgba(6, 182, 212, 0.3)',
     lime: 'rgba(132, 204, 22, 0.3)',
+    indigo: 'rgba(99, 102, 241, 0.3)',
+    teal: 'rgba(20, 184, 166, 0.3)',
   },
   Ck = Object.keys(Kt),
   Ek = ['circle', 'square', 'triangle', 'star', 'horizontal', 'diagonal'],
@@ -18845,7 +18843,21 @@ function Mk() {
       return () => {
         ;(window.removeEventListener('resize', S), window.clearTimeout(M))
       }
-    }, [l, P]))
+    }, [l, P]),
+    y.useEffect(() => {
+      if (typeof window > 'u') return
+      try {
+        const S = { type: 'inopnc-drawing', open: !!l }
+        window.top && window.top !== window && window.top.postMessage(S, window.location.origin)
+      } catch {}
+      return () => {
+        if (typeof window > 'u') return
+        try {
+          const S = { type: 'inopnc-drawing', open: !1 }
+          window.top && window.top !== window && window.top.postMessage(S, window.location.origin)
+        } catch {}
+      }
+    }, [l]))
   const Vt = y.useMemo(
       () => [
         { key: 'hand', label: '이동', icon: p1 },
@@ -19093,7 +19105,7 @@ function Mk() {
           children: [
             c.jsxs('div', {
               className:
-                'flex items-center justify-between border-b border-white/10 px-2 py-2 sm:px-3',
+                'flex items-center justify-between border-b border-white/10 px-2 pt-2.5 pb-2 sm:px-3',
               children: [
                 c.jsxs('div', {
                   className: 'flex items-center gap-2',
@@ -19163,9 +19175,8 @@ function Mk() {
                   onWheel: Nn,
                 }),
                 c.jsx('div', {
-                  className:
-                    'absolute bottom-3 left-3 rounded-md bg-black/45 px-2 py-1 text-[11px] font-medium text-white/90',
-                  children: '핀치줌/휠줌 지원',
+                  className: 'hidden',
+                  children: '',
                 }),
               ],
             }),
@@ -19193,7 +19204,7 @@ function Mk() {
                   className: 'flex flex-wrap items-center gap-2 border-t border-border px-3 py-2',
                   children: [
                     c.jsx('div', {
-                      className: 'flex items-center gap-1',
+                      className: 'flex flex-wrap items-center gap-1',
                       children: Ck.map(S =>
                         c.jsx(
                           'button',

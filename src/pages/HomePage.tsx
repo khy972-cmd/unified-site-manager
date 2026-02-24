@@ -11,11 +11,18 @@ export default function HomePage() {
   }
 
   return (
-    <section className="-mx-4 -mt-2 -mb-6">
+    <section
+      className="-mx-4"
+      style={{
+        marginTop: "var(--home-section-mt, -0.5rem)",
+        marginBottom: "var(--home-section-mb, -1.5rem)",
+      }}
+    >
       <iframe
         title="INOPNC Home Main"
         src={HOME_MAIN_URL}
-        className="block h-[calc(100dvh-114px)] w-full border-0 bg-background"
+        className="block w-full border-0 bg-background"
+        style={{ height: "calc(100dvh - var(--app-header-height, 114px))" }}
       />
     </section>
   );

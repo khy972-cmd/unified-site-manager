@@ -142,7 +142,7 @@ export default function PartnerHomePage() {
         return (
           <div key={s.id} className="bg-card rounded-2xl shadow-soft mb-5 overflow-hidden relative">
             <span className={cn(
-              "absolute top-0 right-0 text-[13px] font-bold px-3.5 py-1.5 text-white rounded-bl-xl z-10",
+              "absolute top-0 right-0 text-[11px] font-bold px-3 py-1 text-white rounded-bl-xl z-10",
               s.status === "ing" ? "bg-blue-500" : "bg-violet-500"
             )}>
               {s.status === "ing" ? "진행중" : "예정"}

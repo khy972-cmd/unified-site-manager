@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+﻿import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Search, MapPin, ChevronDown, ChevronUp, Pin, PinOff, Phone, Ruler,
   Camera, FileCheck2, ClipboardList, CheckCircle2, X, Plus, Map as MapIcon
@@ -363,13 +363,13 @@ function WorkerSitePage() {
       </div>
 
       {/* Status Filters */}
-      <div className="flex gap-2 mb-4">
+      <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1 no-scrollbar">
         {FILTERS.map(f => (
           <button
             key={f.key}
             onClick={() => { setFilter(f.key); setVisibleCount(5); }}
             className={cn(
-              "flex-1 h-10 rounded-full text-sm-app font-medium border transition-all cursor-pointer flex items-center justify-center",
+              "h-10 px-3.5 rounded-full text-sm-app font-medium whitespace-nowrap flex-shrink-0 border transition-all cursor-pointer flex items-center justify-center",
               filter === f.key
                 ? f.key === "all" ? "bg-primary text-white border-primary font-bold shadow-sm"
                 : f.key === "ing" ? "bg-blue-500 text-white border-blue-500 font-bold shadow-sm"
@@ -394,7 +394,7 @@ function WorkerSitePage() {
       )}
 
       {/* Site Cards */}
-      <div className="space-y-5">
+      <div className="space-y-4">
         {displayed.map(site => {
           const expanded = expandedIds.has(site.id);
           const statusConf = STATUS_CONFIG[site.status];
@@ -414,41 +414,41 @@ function WorkerSitePage() {
               )}
             >
               {/* Card Header */}
-              <div className="p-5 border-b border-border relative">
-                <span className={cn("absolute top-0 right-0 text-[13px] font-bold px-3.5 py-1.5 rounded-bl-xl z-10", statusConf.className)}>
+              <div className="p-5 max-[640px]:p-4 border-b border-border relative">
+                <span className={cn("absolute top-0 right-0 text-[11px] font-bold px-2.5 py-1 rounded-bl-xl z-10", statusConf.className)}>
                   {statusConf.label}
                 </span>
 
                 {site.lastDate && (
-                  <div className="text-sm-app text-text-sub font-medium mb-1">
+                  <div className="text-sm-app text-text-sub font-medium mb-1 max-[640px]:mb-0.5">
                     {site.lastDate} {site.lastTime ? `(최종 ${site.lastTime})` : ""}
                   </div>
                 )}
 
                 <div className="flex items-start justify-between mb-2">
-                  <h3 className="text-[20px] font-[800] text-header-navy flex-1 leading-tight" style={{ wordBreak: "keep-all" }}>{site.name}</h3>
+                  <h3 className="text-[20px] max-[640px]:text-[18px] font-[800] text-header-navy flex-1 leading-snug" style={{ wordBreak: "keep-all" }}>{site.name}</h3>
                   <button onClick={e => togglePin(site.id, e)} className="bg-transparent border-none p-1 cursor-pointer ml-2">
                     {site.pinned ? <PinOff className="w-[22px] h-[22px] text-primary" /> : <Pin className="w-[22px] h-[22px] text-border" />}
                   </button>
                 </div>
 
                 {/* Sub info */}
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex gap-2 items-center flex-wrap min-w-0">
-                    <span className="text-[14px] px-3 h-[34px] rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-500 font-semibold flex items-center">현대건설</span>
+                <div className="flex items-center justify-between mb-3 max-[640px]:mb-2">
+                  <div className="flex gap-2 max-[640px]:gap-1.5 items-center flex-wrap min-w-0">
+                    <span className="text-[14px] max-[640px]:text-[13px] px-3 max-[640px]:px-2.5 h-[34px] max-[640px]:h-[30px] rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-500 font-semibold flex items-center">현대건설</span>
                     <span className={cn(
-                      "text-[14px] px-3 h-[34px] rounded-lg border font-semibold flex items-center",
+                      "text-[14px] max-[640px]:text-[13px] px-3 max-[640px]:px-2.5 h-[34px] max-[640px]:h-[30px] rounded-lg border font-semibold flex items-center",
                       site.affil === "직접등록"
                         ? "bg-red-50 text-red-700 border-red-200"
                         : "bg-sky-50 text-sky-600 border-sky-200"
                     )}>{site.affil}</span>
                   </div>
-                  <div className="flex gap-1.5 items-center pl-2 border-l border-border ml-1">
-                    <MapIcon className={cn("w-4 h-4 transition-colors", hasDraw ? "text-header-navy" : "text-border")} />
-                    <Camera className={cn("w-4 h-4 transition-colors", hasPhoto ? "text-header-navy" : "text-border")} />
-                    <FileCheck2 className={cn("w-4 h-4 transition-colors", hasPTW ? "text-header-navy" : "text-border")} />
-                    <ClipboardList className={cn("w-4 h-4 transition-colors", hasLog ? "text-header-navy" : "text-border")} />
-                    <CheckCircle2 className={cn("w-4 h-4 transition-colors", hasPunch ? "text-header-navy" : "text-border")} />
+                  <div className="flex gap-1.5 max-[640px]:gap-1 items-center pl-2 border-l border-border ml-1">
+                    <MapIcon className={cn("w-4 h-4 max-[640px]:w-[15px] max-[640px]:h-[15px] transition-colors", hasDraw ? "text-header-navy" : "text-border")} />
+                    <Camera className={cn("w-4 h-4 max-[640px]:w-[15px] max-[640px]:h-[15px] transition-colors", hasPhoto ? "text-header-navy" : "text-border")} />
+                    <FileCheck2 className={cn("w-4 h-4 max-[640px]:w-[15px] max-[640px]:h-[15px] transition-colors", hasPTW ? "text-header-navy" : "text-border")} />
+                    <ClipboardList className={cn("w-4 h-4 max-[640px]:w-[15px] max-[640px]:h-[15px] transition-colors", hasLog ? "text-header-navy" : "text-border")} />
+                    <CheckCircle2 className={cn("w-4 h-4 max-[640px]:w-[15px] max-[640px]:h-[15px] transition-colors", hasPunch ? "text-header-navy" : "text-border")} />
                   </div>
                 </div>
 
@@ -465,7 +465,7 @@ function WorkerSitePage() {
                   </div>
                   <button
                     className={cn(
-                      "w-9 h-9 rounded-[10px] flex items-center justify-center shrink-0 ml-2 transition-all active:scale-95",
+                      "w-9 h-9 max-[640px]:w-8 max-[640px]:h-8 rounded-[10px] flex items-center justify-center shrink-0 ml-2 transition-all active:scale-95",
                       hasAddr
                         ? "bg-[hsl(219_100%_95%)] border border-[hsl(219_100%_90%)] text-[hsl(230_60%_30%)]"
                         : "border border-dashed border-muted-foreground/40 text-muted-foreground bg-transparent opacity-90"
@@ -479,19 +479,19 @@ function WorkerSitePage() {
 
               {/* Expanded Detail */}
               {expanded && (
-                <div className="p-5 animate-slide-down bg-card">
+                <div className="p-5 max-[640px]:p-4 animate-slide-down bg-card">
                   {/* Manager + Safety */}
                   {[
                     { label: "현장소장", value: site.manager, phone: site.phoneM },
                     { label: "안전담당", value: site.safety, phone: site.phoneS },
                   ].map(row => (
-                    <div key={row.label} className="flex justify-between items-center py-3.5 border-b border-dashed border-border">
+                    <div key={row.label} className="flex justify-between items-center py-3 max-[640px]:py-2.5 border-b border-dashed border-border">
                       <span className="text-base-app text-text-sub font-bold w-20">{row.label}</span>
                       <div className="flex items-center gap-2">
                         <span className="flex-1 text-right text-base-app font-semibold text-foreground truncate pr-3">{row.value || "입력"}</span>
                         <button
                           className={cn(
-                            "w-9 h-9 rounded-[10px] flex items-center justify-center shrink-0 transition-all active:scale-95",
+                            "w-9 h-9 max-[640px]:w-8 max-[640px]:h-8 rounded-[10px] flex items-center justify-center shrink-0 transition-all active:scale-95",
                             row.phone ? "bg-[hsl(219_100%_95%)] border border-[hsl(219_100%_90%)] text-[hsl(230_60%_30%)]" : "border border-dashed border-border bg-transparent text-muted-foreground"
                           )}
                           onClick={() => handlePhone(row.phone)}
@@ -503,7 +503,7 @@ function WorkerSitePage() {
                   ))}
 
                   {/* Lodge */}
-                  <div className="flex justify-between items-center py-3.5 border-b border-dashed border-border">
+                  <div className="flex justify-between items-center py-3 max-[640px]:py-2.5 border-b border-dashed border-border">
                     <span className="text-base-app text-text-sub font-bold w-20">숙소</span>
                     <div className="flex items-center gap-2 flex-1 justify-end">
                       <span className="text-base-app font-semibold text-foreground truncate pr-3 text-right cursor-pointer" style={{ maxWidth: "60%" }}>
@@ -511,7 +511,7 @@ function WorkerSitePage() {
                       </span>
                       <button
                         className={cn(
-                          "w-9 h-9 rounded-[10px] flex items-center justify-center shrink-0 transition-all active:scale-95",
+                          "w-9 h-9 max-[640px]:w-8 max-[640px]:h-8 rounded-[10px] flex items-center justify-center shrink-0 transition-all active:scale-95",
                           site.lodge ? "bg-[hsl(219_100%_95%)] border border-[hsl(219_100%_90%)] text-[hsl(230_60%_30%)]" : "border border-dashed border-primary text-primary bg-transparent"
                         )}
                         onClick={() => site.lodge ? window.open(`https://www.tmap.co.kr/`) : toast("주소 찾기 (준비 중)")}
@@ -522,7 +522,7 @@ function WorkerSitePage() {
                   </div>
 
                   {/* Stats */}
-                  <div className="flex py-3.5">
+                  <div className="flex py-3 max-[640px]:py-2.5">
                     <div className="flex-1 text-center relative">
                       <span className="block text-base-app text-text-sub font-bold mb-2">작업일 누계</span>
                       <span className="text-lg-app font-[800] text-header-navy">{site.days}일</span>
@@ -535,7 +535,7 @@ function WorkerSitePage() {
                   </div>
 
                   {/* Action Grid */}
-                  <div className="grid grid-cols-5 gap-1.5 mt-0">
+                  <div className="grid grid-cols-5 gap-1.5 max-[640px]:gap-1 mt-0">
                     {[
                       { icon: Ruler, label: "도면", active: hasDraw, color: "bg-primary-bg text-primary border-sky-200", onClick: () => hasDraw ? openDrawSheet(site.id) : toast.error("등록된 도면이 없습니다") },
                       { icon: Camera, label: "사진", active: hasPhoto, color: "bg-indigo-50 text-indigo-500 border-indigo-200", onClick: () => checkData(site, "images") },
@@ -546,7 +546,7 @@ function WorkerSitePage() {
                       <button
                         key={label}
                         className={cn(
-                          "flex flex-col items-center justify-center gap-1.5 h-[74px] rounded-xl border cursor-pointer transition-all active:scale-95",
+                          "flex flex-col items-center justify-center gap-1.5 max-[640px]:gap-1 h-[74px] max-[640px]:h-[64px] rounded-xl border cursor-pointer transition-all active:scale-95",
                           active ? color : "bg-muted border-border text-border opacity-60 cursor-not-allowed"
                         )}
                         onClick={onClick}

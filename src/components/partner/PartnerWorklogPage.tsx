@@ -263,7 +263,7 @@ export default function PartnerWorklogPage() {
                   log.isPinned && "border-2 border-primary shadow-[0_4px_12px_rgba(49,163,250,0.2)]"
                 )}
               >
-                <span className={cn("absolute top-0 right-0 text-[13px] font-bold px-3.5 py-1.5 text-white rounded-bl-xl z-10", st.badgeBg)}>{st.label}</span>
+                <span className={cn("absolute top-0 right-0 text-[11px] font-bold px-3 py-1 text-white rounded-bl-xl z-10", st.badgeBg)}>{st.label}</span>
                 <div className="p-5">
                   <div className="flex items-center gap-1.5 mb-1 text-[15px] text-text-sub font-semibold">
                     <Calendar className="w-3.5 h-3.5" /> {log.latestDate}

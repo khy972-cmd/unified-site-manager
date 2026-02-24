@@ -27,6 +27,7 @@ export default function AppLayout() {
   const [certOpen, setCertOpen] = useState(false);
   const [notificationCount, setNotificationCount] = useState(2);
   const [hasAutoOpenedToday, setHasAutoOpenedToday] = useState(false);
+  const [isDrawingOverlayOpen, setIsDrawingOverlayOpen] = useState(false);
 
   useEffect(() => {
     if (notifyOpen || hasAutoOpenedToday) return;
@@ -37,6 +38,18 @@ export default function AppLayout() {
     setHasAutoOpenedToday(true);
   }, [hasAutoOpenedToday, notificationCount, notifyOpen]);
 
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data as { type?: string; open?: boolean };
+      if (!data || data.type !== "inopnc-drawing") return;
+      setIsDrawingOverlayOpen(Boolean(data.open));
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
+
   const openNotificationPanel = () => {
     // Manual open must work even if user hid auto-popup for today.
     setHasAutoOpenedToday(true);
@@ -44,15 +57,30 @@ export default function AppLayout() {
   };
 
   return (
-    <div className="inopnc-app">
-      <AppHeader
-        onSearch={() => setSearchOpen(true)}
-        onCert={() => setCertOpen(true)}
-        onNotify={openNotificationPanel}
-        onMenu={() => setMenuOpen(true)}
-        notificationCount={notificationCount}
-      />
-      <main className="pt-[114px] pb-6 px-4">
+    <div
+      className="inopnc-app"
+      style={{
+        "--app-header-height": isDrawingOverlayOpen ? "0px" : "114px",
+        "--home-section-mt": isDrawingOverlayOpen ? "0px" : "-0.5rem",
+        "--home-section-mb": isDrawingOverlayOpen ? "0px" : "-1.5rem",
+      } as any}
+    >
+      {!isDrawingOverlayOpen && (
+        <AppHeader
+          onSearch={() => setSearchOpen(true)}
+          onCert={() => setCertOpen(true)}
+          onNotify={openNotificationPanel}
+          onMenu={() => setMenuOpen(true)}
+          notificationCount={notificationCount}
+        />
+      )}
+      <main
+        className="px-4"
+        style={{
+          paddingTop: "var(--app-header-height, 114px)",
+          paddingBottom: isDrawingOverlayOpen ? "0px" : "1.5rem",
+        }}
+      >
         <Outlet />
       </main>
 
