@@ -1,4 +1,4 @@
-﻿import { useState, useMemo, useRef, useCallback, useEffect } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useUserRole } from "@/hooks/useUserRole";
 import {
   Search, Plus, X, FileText, MapPin, Trash2, ArrowLeft, Check, Upload, FileUp, Calendar, User, Building, Wrench, Eye, Edit3, ChevronDown, ChevronUp, Download, Share2, Camera, RefreshCw, Lock, MapPinIcon, Info
@@ -45,72 +45,107 @@ interface BlueprintSiteData {
   history: BlueprintHistoryItem[];
 }
 
-const IMG_CONCRETE = "https://images.unsplash.com/photo-1504307651254-35680f356dfd?q=80&w=400&auto=format&fit=crop";
-const IMG_CRACK = "https://images.unsplash.com/photo-1581094271901-8022df4466f9?q=80&w=400&auto=format&fit=crop";
-const IMG_WALL = "https://images.unsplash.com/photo-1503387762-592deb58ef4e?q=80&w=400&auto=format&fit=crop";
-
-// Global Blueprint Storage (sample data for UI)
+// Global Blueprint Storage
 const blueprintStorage: Record<string, BlueprintSiteData> = {
-  "sys:서울 신축현장": {
-    id: "sys:서울 신축현장",
-    siteName: "서울 신축현장",
+  "sys:춘천 레고랜드": {
+    id: "sys:춘천 레고랜드",
+    siteName: "춘천 레고랜드",
     siteSource: "system",
     affiliation: "협력업체",
-    contractor: "포스코건설",
-    totalDrawings: 2,
-    currentVersion: 1,
-    lastUpdated: "2026-02-10",
+    contractor: "현대건설",
+    totalDrawings: 8,
+    currentVersion: 3,
+    lastUpdated: "2025-12-09",
     history: [
       {
-        id: "bp_hist_1",
-        date: "2026-02-10",
+        id: "hist_3",
+        date: "2025-12-09",
         time: "14:30",
-        author: "관리자",
+        author: "김설계",
         affiliation: "협력업체",
-        contractor: "포스코건설",
+        contractor: "현대건설",
         component: "기둥",
         process: "마감",
         files: [
-          { id: "bp_f1", name: "기둥_상세도.pdf", type: "file", url: "", size: "2.1MB", ext: "PDF", version: "v1" },
-          { id: "bp_f2", name: "현장사진.jpg", type: "img", url: IMG_WALL, size: "1.2MB", ext: "JPG", version: "v1" },
+          { id: "f1", name: "기둥상세도_v3.pdf", type: "file", url: "", size: "2.1MB", ext: "PDF", version: "v3" },
+          { id: "f2", name: "마감재료표.xlsx", type: "file", url: "", size: "856KB", ext: "XLSX", version: "v1" }
         ],
-        version: 1,
+        version: 3
       },
-    ],
+      {
+        id: "hist_2",
+        date: "2025-12-07",
+        time: "09:15",
+        author: "박구조",
+        affiliation: "협력업체",
+        contractor: "현대건설",
+        component: "거더",
+        process: "철근배근",
+        files: [
+          { id: "f3", name: "보철근배근도.pdf", type: "file", url: "", size: "3.2MB", ext: "PDF", version: "v2" },
+          { id: "f4", name: "철근상세표.pdf", type: "file", url: "", size: "1.8MB", ext: "PDF", version: "v1" }
+        ],
+        version: 2
+      },
+      {
+        id: "hist_1",
+        date: "2025-12-05",
+        time: "16:45",
+        author: "이건축",
+        affiliation: "협력업체",
+        contractor: "현대건설",
+        component: "슬라브",
+        process: "거푸집",
+        files: [
+          { id: "f5", name: "슬래브평면도.pdf", type: "file", url: "", size: "4.5MB", ext: "PDF", version: "v1" },
+          { id: "f6", name: "거푸집상세도.pdf", type: "file", url: "", size: "2.7MB", ext: "PDF", version: "v1" },
+          { id: "f7", name: "현장사진1.jpg", type: "img", url: "", size: "1.2MB", ext: "JPG", version: "v1" },
+          { id: "f8", name: "현장사진2.jpg", type: "img", url: "", size: "980KB", ext: "JPG", version: "v1" }
+        ],
+        version: 1
+      }
+    ]
   },
-  "custom:리모델링 B현장": {
-    id: "custom:리모델링 B현장",
-    siteName: "리모델링 B현장",
+  "custom:송파 B현장": {
+    id: "custom:송파 B현장",
+    siteName: "송파 B현장",
     siteSource: "custom",
-    affiliation: "직접입력",
+    affiliation: "직접등록",
     contractor: "GS건설",
-    totalDrawings: 1,
+    totalDrawings: 3,
     currentVersion: 1,
-    lastUpdated: "2026-02-12",
+    lastUpdated: "2025-12-08",
     history: [
       {
-        id: "bp_hist_2",
-        date: "2026-02-12",
-        time: "09:15",
-        author: "현장소장",
-        affiliation: "직접입력",
+        id: "hist_4",
+        date: "2025-12-08",
+        time: "11:20",
+        author: "최현장",
+        affiliation: "직접등록",
         contractor: "GS건설",
-        component: "슬라브",
-        process: "형틀",
+        component: "외벽",
+        process: "단열공사",
         files: [
-          { id: "bp_f3", name: "슬라브_배근도.pdf", type: "file", url: "", size: "3.4MB", ext: "PDF", version: "v1" },
+          { id: "f9", name: "외벽단열상세도.pdf", type: "file", url: "", size: "3.8MB", ext: "PDF", version: "v1" },
+          { id: "f10", name: "단열재시방서.hwp", type: "file", url: "", size: "245KB", ext: "HWP", version: "v1" },
+          { id: "f11", name: "시공전경.jpg", type: "img", url: "", size: "1.5MB", ext: "JPG", version: "v1" }
         ],
-        version: 1,
-      },
-    ],
-  },
+        version: 1
+      }
+    ]
+  }
 };
 
 const DOC_TABS = ["내문서함", "회사서류", "도면함", "사진함", "조치"];
 
 // Home(작업일지)와 동일한 부재명/작업공정 옵션 (도면 등록에도 동일 기준 적용)
 const MEMBER_CHIPS = ["슬라브", "거더", "기둥", "기타"];
-const PROCESS_CHIPS = ["철근", "형틀", "마감", "기타"];
+const PROCESS_CHIPS = ["균열", "면", "마감", "기타"];
+
+const IMG_CONCRETE = "https://images.unsplash.com/photo-1504307651254-35680f356dfd?q=80&w=400&auto=format&fit=crop";
+const IMG_CRACK = "https://images.unsplash.com/photo-1581094271901-8022df4466f9?q=80&w=400&auto=format&fit=crop";
+const IMG_WALL = "https://images.unsplash.com/photo-1503387762-592deb58ef4e?q=80&w=400&auto=format&fit=crop";
+
 type DocFile = {
   id: string;
   name: string;
@@ -138,54 +173,24 @@ type Doc = {
 };
 
 const MOCK_DOCS: Record<string, Doc[]> = {
-  "내문서함": [
-    {
-      id: "md1",
-      title: "기초 안전점검 보고서",
-      author: "박현우",
-      date: "2026-02-15",
-      time: "09:10",
-      files: [
-        { id: "md1f1", name: "현장사진_1.jpg", type: "img", url: IMG_WALL, size: "1.2MB", ext: "JPG", version: "v1" },
-      ],
-    },
-    {
-      id: "md2",
-      title: "공정 회의록",
-      author: "박현우",
-      date: "2026-02-16",
-      time: "13:30",
-      files: [],
-    },
+  '내문서함': [
+    { id: 'md1', title: '기초안전보건교육이수증', author: '박작업', date: '2025-12-28', time: '09:10', files: [{ id: 'md1f1', name: '기초안전교육이수증.jpg', type: 'img', url: IMG_WALL, size: '1.2MB', ext: 'JPG', version: 'v1' }] },
+    { id: 'md2', title: '통장사본', author: '박작업', date: '2025-12-28', time: '09:10', files: [] },
+    { id: 'md3', title: '신분증', author: '박작업', date: '2025-12-28', time: '09:10', files: [] },
+    { id: 'md4', title: '배치전 검진서', author: '박작업', date: '2025-12-28', time: '09:10', files: [] },
+    { id: 'md5', title: '차량등록증', author: '박작업', date: '2025-12-28', time: '09:10', files: [] },
+    { id: 'md6', title: '차량보험증', author: '박작업', date: '2025-12-28', time: '09:10', files: [] },
+    { id: 'md7', title: '고령자서류', author: '박작업', date: '2025-12-28', time: '09:10', files: [] },
   ],
-  "회사서류": [
-    {
-      id: "co1",
-      title: "협력업체 계약서",
-      author: "관리자",
-      date: "2026-01-05",
-      time: "10:00",
-      files: [
-        { id: "co1f1", name: "계약서.hwp", type: "file", url: "", size: "54KB", ext: "HWP", version: "v1" },
-      ],
-    },
+  '회사서류': [
+    { id: 'g2', title: '표준계약서', author: '관리자', date: '2025-01-01', time: '10:00', files: [{ id: 'f2', name: '계약서.hwp', type: 'file', url: '', size: '54KB', ext: 'HWP', version: 'v1' }] },
   ],
-  "도면함": [],
-  "사진함": [
-    {
-      id: "ph1",
-      title: "서울 신축현장",
-      contractor: "포스코건설",
-      affiliation: "협력업체",
-      author: "김민수",
-      date: "2026-02-18",
-      time: "16:45",
-      files: [
-        { id: "ph1f1", name: "현장사진_2.jpg", type: "img", url: IMG_CONCRETE, size: "2.5MB", ext: "JPG", version: "v1" },
-      ],
-    },
+  '도면함': [
+    { id: 'g3', title: '송파 B현장', contractor: 'GS건설', affiliation: '협력업체', author: '김설계', date: '2025-12-08', time: '14:20', files: [{ id: 'f3', name: '1F 배관도면.pdf', type: 'file', url: '', size: '5MB', ext: 'PDF', version: 'v3', drawingState: 'ing' }] },
   ],
-  "조치": [],
+  '사진함': [
+    { id: 'g4', title: '송파 B현장', contractor: 'GS건설', affiliation: '협력업체', author: '이시공', date: '2025-12-09', time: '16:45', files: [{ id: 'f4', name: '시공사진1', type: 'img', url: IMG_CONCRETE, size: '2.5MB', ext: 'JPG', version: 'v1', url_before: IMG_CONCRETE, url_after: IMG_CONCRETE, currentView: 'after' }] },
+  ],
 };
 
 const formatDateShort = (d: string) => {
@@ -194,7 +199,7 @@ const formatDateShort = (d: string) => {
 };
 
 // ─── Korean 초성 검색 유틸 (소속 검색용) ───
-const CHOSUNG = ['ㄱ','ㄲ','ㄴ','ㄷ','ㄸ','ㄹ','ㅁ','ㅂ','ㅃ','ㅅ','ㅆ','ㅇ','ㅈ','ㅉ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ'] as const;
+const CHOSUNG = ['ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'] as const;
 const CHOSUNG_SET = new Set<string>(CHOSUNG as unknown as string[]);
 
 function toChosung(text: string): string {
@@ -225,253 +230,6 @@ function matchKo(option: string, query: string): boolean {
     return toChosung(option).replace(/\s+/g, '').includes(q.replace(/\s+/g, ''));
   }
   return option.toLowerCase().includes(q.toLowerCase());
-}
-
-type ZoomPanPoint = { x: number; y: number };
-type UseZoomPanOptions = {
-  minScale?: number;
-  maxScale?: number;
-  initialScale?: number;
-  autoFit?: boolean;
-};
-
-function useZoomPan<T extends HTMLElement>(options: UseZoomPanOptions = {}) {
-  const { minScale = 0.5, maxScale = 4, initialScale = 1, autoFit = true } = options;
-  const containerRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<T | null>(null);
-  const [scale, setScale] = useState(initialScale);
-  const [fitScale, setFitScale] = useState(1);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const scaleRef = useRef(scale);
-  const positionRef = useRef(position);
-
-  useEffect(() => {
-    scaleRef.current = scale;
-  }, [scale]);
-
-  useEffect(() => {
-    positionRef.current = position;
-  }, [position]);
-
-  const getSizes = useCallback(() => {
-    const container = containerRef.current;
-    const content = contentRef.current;
-    if (!container || !content) return null;
-    const cw = container.clientWidth || 1;
-    const ch = container.clientHeight || 1;
-    const ew = (content as HTMLElement).offsetWidth || 1;
-    const eh = (content as HTMLElement).offsetHeight || 1;
-    return { cw, ch, ew, eh };
-  }, []);
-
-  const clampPosition = useCallback((pos: ZoomPanPoint, s: number) => {
-    const sizes = getSizes();
-    if (!sizes) return pos;
-    const maxX = Math.max(0, (sizes.ew * s - sizes.cw) / 2);
-    const maxY = Math.max(0, (sizes.eh * s - sizes.ch) / 2);
-    return {
-      x: Math.min(maxX, Math.max(-maxX, pos.x)),
-      y: Math.min(maxY, Math.max(-maxY, pos.y)),
-    };
-  }, [getSizes]);
-
-  const applyScale = useCallback((nextScale: number, center?: ZoomPanPoint) => {
-    const container = containerRef.current;
-    const prevScale = scaleRef.current || 1;
-    const prevPos = positionRef.current;
-    const min = Math.max(minScale, fitScale || minScale);
-    const clamped = Math.max(min, Math.min(maxScale, nextScale));
-    if (!container || !Number.isFinite(clamped)) {
-      setScale(clamped);
-      return;
-    }
-    const rect = container.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    const px = center ? center.x - cx : 0;
-    const py = center ? center.y - cy : 0;
-    const ratio = clamped / prevScale;
-    const nextPos = clampPosition(
-      {
-        x: prevPos.x * ratio + px * (1 - ratio),
-        y: prevPos.y * ratio + py * (1 - ratio),
-      },
-      clamped
-    );
-    setScale(clamped);
-    setPosition(nextPos);
-  }, [clampPosition, fitScale, maxScale, minScale]);
-
-  const reset = useCallback((nextScale?: number) => {
-    const target = nextScale ?? fitScale;
-    const min = Math.max(minScale, fitScale || minScale);
-    const clamped = Math.max(min, Math.min(maxScale, target));
-    setScale(clamped);
-    setPosition({ x: 0, y: 0 });
-  }, [fitScale, maxScale, minScale]);
-
-  const recalcFit = useCallback(() => {
-    const sizes = getSizes();
-    if (!sizes) return;
-    const fit = Math.min(sizes.cw / sizes.ew, sizes.ch / sizes.eh);
-    if (!Number.isFinite(fit) || fit <= 0) return;
-    setFitScale(fit);
-    if (autoFit) {
-      setScale(fit);
-      setPosition({ x: 0, y: 0 });
-      return;
-    }
-    const min = Math.max(minScale, fit);
-    setScale(prev => Math.max(min, Math.min(maxScale, prev)));
-    setPosition(prev => clampPosition(prev, scaleRef.current));
-  }, [autoFit, clampPosition, getSizes, maxScale, minScale]);
-
-  useEffect(() => {
-    recalcFit();
-    const ro = new ResizeObserver(() => recalcFit());
-    if (containerRef.current) ro.observe(containerRef.current);
-    if (contentRef.current) ro.observe(contentRef.current);
-    return () => ro.disconnect();
-  }, [recalcFit]);
-
-  const canPan = scale > fitScale + 0.01;
-
-  const shouldIgnoreTarget = useCallback((target: EventTarget | null) => {
-    const el = target as HTMLElement | null;
-    if (!el) return false;
-    if (el.closest("[data-no-pan='1']")) return true;
-    if (el.isContentEditable || el.closest("[contenteditable='true']")) return true;
-    const tag = el.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON") return true;
-    return false;
-  }, []);
-
-  const dragState = useRef({ active: false, start: { x: 0, y: 0 }, startPos: { x: 0, y: 0 } });
-  const pinchState = useRef({
-    active: false,
-    initialDistance: 0,
-    initialScale: 1,
-    center: { x: 0, y: 0 },
-  });
-  const lastTapRef = useRef(0);
-
-  const onMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button !== 0) return;
-    if (shouldIgnoreTarget(e.target)) return;
-    if (!canPan) return;
-    dragState.current = { active: true, start: { x: e.clientX, y: e.clientY }, startPos: positionRef.current };
-    setIsDragging(true);
-  }, [canPan, shouldIgnoreTarget]);
-
-  const onMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!dragState.current.active) return;
-    const dx = e.clientX - dragState.current.start.x;
-    const dy = e.clientY - dragState.current.start.y;
-    const nextPos = clampPosition(
-      { x: dragState.current.startPos.x + dx, y: dragState.current.startPos.y + dy },
-      scaleRef.current
-    );
-    setPosition(nextPos);
-  }, [clampPosition]);
-
-  const endDrag = useCallback(() => {
-    dragState.current.active = false;
-    setIsDragging(false);
-  }, []);
-
-  const onTouchStart = useCallback((e: React.TouchEvent) => {
-    if (shouldIgnoreTarget(e.target)) return;
-    if (e.touches.length === 2) {
-      e.preventDefault();
-      const [t1, t2] = [e.touches[0], e.touches[1]];
-      const dx = t2.clientX - t1.clientX;
-      const dy = t2.clientY - t1.clientY;
-      pinchState.current = {
-        active: true,
-        initialDistance: Math.hypot(dx, dy),
-        initialScale: scaleRef.current,
-        center: { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 },
-      };
-      return;
-    }
-    if (e.touches.length === 1 && canPan) {
-      const t = e.touches[0];
-      dragState.current = { active: true, start: { x: t.clientX, y: t.clientY }, startPos: positionRef.current };
-      setIsDragging(true);
-    }
-  }, [canPan, shouldIgnoreTarget]);
-
-  const onTouchMove = useCallback((e: React.TouchEvent) => {
-    if (pinchState.current.active && e.touches.length === 2) {
-      e.preventDefault();
-      const [t1, t2] = [e.touches[0], e.touches[1]];
-      const dx = t2.clientX - t1.clientX;
-      const dy = t2.clientY - t1.clientY;
-      const dist = Math.hypot(dx, dy);
-      const nextScale = pinchState.current.initialScale * (dist / Math.max(1, pinchState.current.initialDistance));
-      const center = { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
-      applyScale(nextScale, center);
-      return;
-    }
-    if (dragState.current.active && e.touches.length === 1) {
-      e.preventDefault();
-      const t = e.touches[0];
-      const dx = t.clientX - dragState.current.start.x;
-      const dy = t.clientY - dragState.current.start.y;
-      const nextPos = clampPosition(
-        { x: dragState.current.startPos.x + dx, y: dragState.current.startPos.y + dy },
-        scaleRef.current
-      );
-      setPosition(nextPos);
-    }
-  }, [applyScale, clampPosition]);
-
-  const onTouchEnd = useCallback((e: React.TouchEvent) => {
-    if (e.touches.length !== 0) return;
-    pinchState.current.active = false;
-    dragState.current.active = false;
-    setIsDragging(false);
-    const now = Date.now();
-    if (now - lastTapRef.current < 250) {
-      const target = scaleRef.current > fitScale * 1.05 ? fitScale : Math.min(maxScale, fitScale * 2);
-      reset(target);
-    }
-    lastTapRef.current = now;
-  }, [fitScale, maxScale, reset]);
-
-  const onWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    applyScale(scaleRef.current * delta, { x: e.clientX, y: e.clientY });
-  }, [applyScale]);
-
-  const onDoubleClick = useCallback(() => {
-    const target = scaleRef.current > fitScale * 1.05 ? fitScale : Math.min(maxScale, fitScale * 2);
-    reset(target);
-  }, [fitScale, maxScale, reset]);
-
-  return {
-    containerRef,
-    contentRef,
-    scale,
-    fitScale,
-    position,
-    isDragging,
-    canPan,
-    setScale: applyScale,
-    reset,
-    recalcFit,
-    onWheel,
-    onMouseDown,
-    onMouseMove,
-    onMouseUp: endDrag,
-    onMouseLeave: endDrag,
-    onTouchStart,
-    onTouchMove,
-    onTouchEnd,
-    onDoubleClick,
-  };
 }
 
 export default function DocPage() {
@@ -546,9 +304,6 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
   const [reportEdits, setReportEdits] = useState<PunchReportEdits>({});
   const reportContentRef = useRef<HTMLDivElement | null>(null);
   const reportTableBodyRef = useRef<HTMLTableSectionElement | null>(null);
-  const reportPhotoInputRef = useRef<HTMLInputElement>(null);
-  const [reportPhotoTarget, setReportPhotoTarget] = useState<{ itemId: string; field: "beforePhoto" | "afterPhoto" } | null>(null);
-  const reportZoom = useZoomPan<HTMLDivElement>({ minScale: 0.5, maxScale: 4, autoFit: true });
   // PATCH END
 
   // Supabase-backed punch data
@@ -564,14 +319,14 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
   const isBlueprint = tabKey === '도면함';
 
   const bpAffiliationOptions = useMemo(() => {
-    const base = ["포스코건설", "GS건설", "현대건설", "대보건설", "기타"];
+    const base = ["협력업체", "직영", "본사", "직접등록", "기타"];
     const fromBlueprint = Object.values(blueprintStorage).map(s => s.affiliation).filter(Boolean);
     const fromPunch = punchGroups.map(g => g.affiliation).filter(Boolean);
     return Array.from(new Set([...base, ...fromBlueprint, ...fromPunch]));
   }, [punchGroups]);
 
   const bpContractorOptions = useMemo(() => {
-    const base = ["포스코건설", "GS건설", "현대건설", "대보건설", "기타"];
+    const base = ["현대건설", "GS건설", "삼성물산", "이노피앤씨", "기타"];
     const fromBlueprint = Object.values(blueprintStorage).map(s => s.contractor).filter(Boolean);
     const fromPunch = punchGroups.map(g => g.contractor).filter(Boolean);
     return Array.from(new Set([...base, ...fromBlueprint, ...fromPunch]));
@@ -613,8 +368,8 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     if (!aff) return;
 
     const autoContractorByAff: Record<string, string> = {
-      "직영": "포스코건설",
-      "본사": "포스코건설",
+      직영: "이노피앤씨",
+      본사: "이노피앤씨",
     };
 
     // "기타"는 직접 입력 모드
@@ -769,11 +524,6 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
   }, [detailGroupId, punchGroups]);
 
   const isApproved = detailGroup?.punchItems?.every(i => i.status === 'done') || false;
-  const reportGroup = useMemo(() => {
-    if (!reportModel) return null;
-    return punchGroups.find(g => g.id === reportModel.groupId) || null;
-  }, [reportModel, punchGroups]);
-  const reportIsApproved = reportGroup?.punchItems?.every(i => i.status === "done") || false;
 
   const openDetail = (groupId: string) => {
     setDetailGroupId(groupId);
@@ -785,14 +535,6 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     setSelectedIds(new Set());
   };
 
-  useEffect(() => {
-    if (!reportEditorOpen) return;
-    const handle = () => reportZoom.recalcFit();
-    requestAnimationFrame(handle);
-    window.addEventListener("resize", handle);
-    return () => window.removeEventListener("resize", handle);
-  }, [reportEditorOpen, reportZoom.recalcFit]);
-
   // PATCH START: report editor overlay actions
   const statusLabel = (s: PunchItem["status"]) => (s === "done" ? "완료" : s === "ing" ? "진행중" : "미조치");
 
@@ -802,6 +544,8 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     if (!groupId || !tbody) return;
 
     const nodes = Array.from(tbody.querySelectorAll<HTMLElement>("[data-report-edit='1']"));
+    if (nodes.length === 0) return;
+
     const nextEditsForGroup: Record<string, Partial<Pick<PunchItem, "location" | "issue">>> = {};
     for (const el of nodes) {
       const itemId = el.dataset.itemId || "";
@@ -812,96 +556,27 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
       nextEditsForGroup[itemId][field] = value;
     }
 
-    if (nodes.length > 0) {
-      setReportEdits(prev => {
-        const prevGroup = prev[groupId] || {};
-        const mergedGroup: Record<string, Partial<Pick<PunchItem, "location" | "issue">>> = { ...prevGroup };
-        for (const [itemId, v] of Object.entries(nextEditsForGroup)) {
-          mergedGroup[itemId] = { ...(mergedGroup[itemId] || {}), ...v };
-        }
-        return { ...prev, [groupId]: mergedGroup };
-      });
-    }
-
-    const metaNodes = Array.from(
-      reportContentRef.current?.querySelectorAll<HTMLElement>("[data-report-meta]") || []
-    );
-    const nextMeta: Partial<Pick<PunchReportModel, "title" | "siteName" | "date">> = {};
-    for (const el of metaNodes) {
-      const key = el.dataset.reportMeta as "title" | "siteName" | "date" | undefined;
-      if (!key) continue;
-      const value = (el.innerText || "").replace(/\u00A0/g, " ").trim();
-      nextMeta[key] = value;
-    }
+    setReportEdits(prev => {
+      const prevGroup = prev[groupId] || {};
+      const mergedGroup: Record<string, Partial<Pick<PunchItem, "location" | "issue">>> = { ...prevGroup };
+      for (const [itemId, v] of Object.entries(nextEditsForGroup)) {
+        mergedGroup[itemId] = { ...(mergedGroup[itemId] || {}), ...v };
+      }
+      return { ...prev, [groupId]: mergedGroup };
+    });
 
     setReportModel(prev => {
       if (!prev || prev.groupId !== groupId) return prev;
-      const nextRows =
-        nodes.length === 0
-          ? prev.rows
-          : prev.rows.map(r => ({
-              ...r,
-              location: nextEditsForGroup[r.id]?.location ?? r.location,
-              issue: nextEditsForGroup[r.id]?.issue ?? r.issue,
-            }));
       return {
         ...prev,
-        ...nextMeta,
-        rows: nextRows,
+        rows: prev.rows.map(r => ({
+          ...r,
+          location: nextEditsForGroup[r.id]?.location ?? r.location,
+          issue: nextEditsForGroup[r.id]?.issue ?? r.issue,
+        })),
       };
     });
   }, [reportModel?.groupId]);
-
-  const updateReportPhoto = useCallback((itemId: string, field: "beforePhoto" | "afterPhoto", value: string) => {
-    setReportModel(prev => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        rows: prev.rows.map(r => (r.id === itemId ? { ...r, [field]: value } : r)),
-      };
-    });
-
-    if (!reportModel?.groupId) return;
-    updateItemMutation.mutate(
-      { groupId: reportModel.groupId, itemId, field, value },
-      { onSuccess: () => toast.success(value ? "사진이 업데이트되었습니다." : "사진이 삭제되었습니다.") }
-    );
-  }, [reportModel?.groupId, updateItemMutation]);
-
-  const openReportPhotoPicker = useCallback((itemId: string, field: "beforePhoto" | "afterPhoto") => {
-    if (!reportModel) return;
-    if (reportIsApproved) {
-      toast.error("승인완료 상태에서는 수정할 수 없습니다.");
-      return;
-    }
-    flushReportEditsToState();
-    setReportPhotoTarget({ itemId, field });
-    reportPhotoInputRef.current?.click();
-  }, [flushReportEditsToState, reportIsApproved, reportModel]);
-
-  const onReportPhotoChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !reportPhotoTarget) {
-      e.currentTarget.value = "";
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      updateReportPhoto(reportPhotoTarget.itemId, reportPhotoTarget.field, (ev.target?.result as string) || "");
-      setReportPhotoTarget(null);
-    };
-    reader.readAsDataURL(file);
-    e.currentTarget.value = "";
-  }, [reportPhotoTarget, updateReportPhoto]);
-
-  const clearReportPhoto = useCallback((itemId: string, field: "beforePhoto" | "afterPhoto") => {
-    if (reportIsApproved) {
-      toast.error("승인완료 상태에서는 수정할 수 없습니다.");
-      return;
-    }
-    flushReportEditsToState();
-    updateReportPhoto(itemId, field, "");
-  }, [flushReportEditsToState, reportIsApproved, updateReportPhoto]);
 
   const openReportEditor = useCallback((groupId?: string) => {
     // Determine target group:
@@ -948,16 +623,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     flushReportEditsToState();
     setReportEditorOpen(false);
     setReportModel(null);
-    setReportPhotoTarget(null);
   }, [flushReportEditsToState]);
-
-  const fitReportWidth = useCallback(() => {
-    const container = reportZoom.containerRef.current;
-    const content = reportZoom.contentRef.current;
-    if (!container || !content) return;
-    const next = container.clientWidth / content.offsetWidth;
-    reportZoom.reset(next);
-  }, [reportZoom]);
 
   const loadScript = useCallback((src: string) => {
     return new Promise<void>((resolve, reject) => {
@@ -1024,63 +690,19 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
       clone.style.background = "#ffffff";
       clone.style.margin = "0";
       clone.style.padding = "20mm 10mm";
-      clone.style.boxSizing = "border-box";
       clone.style.fontFamily = "Arial, sans-serif";
       clone.style.pointerEvents = "none";
 
       document.body.appendChild(clone);
 
       try {
-        clone.querySelectorAll("table").forEach((node) => {
-          const table = node as HTMLElement;
-          table.style.tableLayout = "fixed";
-          table.style.width = "100%";
-          table.style.borderCollapse = "collapse";
-        });
-
-        clone.querySelectorAll("td, th").forEach((node) => {
-          const el = node as HTMLElement;
-          el.style.verticalAlign = "top";
-          el.style.lineHeight = "1.4";
-          el.style.paddingTop = "6px";
-          el.style.paddingBottom = "10px";
-          el.style.paddingLeft = "4px";
-          el.style.paddingRight = "4px";
-          el.style.whiteSpace = "normal";
-          el.style.wordBreak = "break-word";
-          el.style.overflowWrap = "anywhere";
-          el.style.boxSizing = "border-box";
-        });
-
-        clone.querySelectorAll("[contenteditable='true']").forEach((node) => {
-          const el = node as HTMLElement;
-          el.style.whiteSpace = "pre-wrap";
-          el.style.wordBreak = "break-word";
-        });
-
-        clone.querySelectorAll("[data-report-remove='1']").forEach((node) => {
-          (node as HTMLElement).style.display = "none";
-        });
-
-        const centerCols = new Set([0, 5]); // NO, 상태 컬럼
-        clone.querySelectorAll("tr").forEach((row) => {
-          const cells = row.querySelectorAll("th, td");
-          centerCols.forEach((idx) => {
-            const cell = cells[idx] as HTMLElement | undefined;
-            if (!cell) return;
-            cell.style.textAlign = "center";
-            cell.style.verticalAlign = "middle";
-          });
-        });
-
-        clone.querySelectorAll("img").forEach((node) => {
-          const img = node as HTMLImageElement;
-          img.style.display = "block";
-          img.style.maxWidth = "100%";
-          img.setAttribute("crossorigin", "anonymous");
-        });
-
         const scale = 2;
+        const cloneRect = clone.getBoundingClientRect();
+        const rowBottomsCanvasPx: number[] = Array.from(clone.querySelectorAll("tbody tr")).map((row) => {
+          const rect = (row as HTMLElement).getBoundingClientRect();
+          return (rect.bottom - cloneRect.top) * scale;
+        });
+
         const images = Array.from(clone.querySelectorAll("img"));
         await Promise.all(images.map(img => {
           if ((img as HTMLImageElement).complete) return Promise.resolve();
@@ -1090,19 +712,12 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
           });
         }));
 
-        const cloneRect = clone.getBoundingClientRect();
-        const rowBottomsCanvasPx: number[] = Array.from(clone.querySelectorAll("tbody tr")).map((row) => {
-          const rect = (row as HTMLElement).getBoundingClientRect();
-          return (rect.bottom - cloneRect.top) * scale;
-        });
-
         const canvas = await html2canvas(clone, {
           scale,
           useCORS: true,
           backgroundColor: "#ffffff",
           logging: false,
-          windowWidth: clone.scrollWidth || 794,
-          windowHeight: clone.scrollHeight || clone.getBoundingClientRect().height,
+          windowWidth: 794, // A4 width baseline
         });
 
         const pdf = new jsPDF("p", "mm", "a4");
@@ -1127,14 +742,10 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
           // Avoid cutting through table rows when possible
           for (let i = rowBottomsCanvasPx.length - 1; i >= 0; i--) {
             const rb = rowBottomsCanvasPx[i];
-            if (rb > y + 40 && rb <= targetEnd) {
+            if (rb > y + 50 && rb <= targetEnd) {
               breakY = rb;
               break;
             }
-          }
-
-          if (breakY <= y + 10) {
-            breakY = targetEnd;
           }
 
           const sliceH = breakY - y;
@@ -1145,7 +756,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
           if (ctx) ctx.drawImage(canvas, 0, y, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
 
           const sliceHeightMm = sliceH * mmPerPx;
-          pdf.addImage(sliceCanvas.toDataURL("image/jpeg", 0.95), "JPEG", marginX, marginY, usableW, sliceHeightMm);
+          pdf.addImage(sliceCanvas.toDataURL("image/jpeg", 0.9), "JPEG", marginX, marginY, usableW, sliceHeightMm);
 
           pageIndex++;
           y = breakY;
@@ -2691,113 +2302,17 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
               <Download className="w-6 h-6" />
             </button>
           </div>
-          <input
-            ref={reportPhotoInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={onReportPhotoChange}
-          />
 
-          <div className="flex-1 bg-[#333] relative overflow-hidden">
+          <div className="flex-1 bg-[#333] overflow-auto p-4">
             <div
-              data-no-pan="1"
-              className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 bg-black/60 text-white rounded-full px-3 py-1"
+              ref={reportContentRef}
+              className="bg-white shadow-lg mx-auto"
+              style={{ width: "210mm", minHeight: "297mm", padding: "20mm 10mm", boxSizing: "border-box" }}
             >
-              <button
-                data-no-pan="1"
-                onClick={() => reportZoom.setScale(reportZoom.scale * 0.9)}
-                className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm"
-              >
-                -
-              </button>
-              <span className="text-[12px] font-semibold min-w-[52px] text-center">
-                {Math.round((reportZoom.scale / (reportZoom.fitScale || 1)) * 100)}%
-              </span>
-              <button
-                data-no-pan="1"
-                onClick={() => reportZoom.setScale(reportZoom.scale * 1.1)}
-                className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm"
-              >
-                +
-              </button>
-              <button
-                data-no-pan="1"
-                onClick={() => reportZoom.reset()}
-                className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center"
-                title="화면맞춤"
-              >
-                <RefreshCw className="w-4 h-4" />
-              </button>
-              <button
-                data-no-pan="1"
-                onClick={fitReportWidth}
-                className="px-2 py-1 rounded-full bg-white/10 hover:bg-white/20 text-[11px] font-semibold"
-              >
-                Fit W
-              </button>
-            </div>
-
-            <div
-              ref={reportZoom.containerRef}
-              className="w-full h-full flex items-center justify-center p-4"
-              style={{
-                touchAction: "none",
-                cursor: reportZoom.canPan ? (reportZoom.isDragging ? "grabbing" : "grab") : "default",
-              }}
-              onWheel={reportZoom.onWheel}
-              onMouseDown={reportZoom.onMouseDown}
-              onMouseMove={reportZoom.onMouseMove}
-              onMouseUp={reportZoom.onMouseUp}
-              onMouseLeave={reportZoom.onMouseLeave}
-              onTouchStart={reportZoom.onTouchStart}
-              onTouchMove={reportZoom.onTouchMove}
-              onTouchEnd={reportZoom.onTouchEnd}
-              onDoubleClick={reportZoom.onDoubleClick}
-            >
-              <div
-                ref={(node) => {
-                  reportContentRef.current = node;
-                  reportZoom.contentRef.current = node;
-                }}
-                className="bg-white shadow-lg"
-                style={{
-                  width: "210mm",
-                  minHeight: "297mm",
-                  padding: "20mm 10mm",
-                  boxSizing: "border-box",
-                  transform: `translate(${reportZoom.position.x}px, ${reportZoom.position.y}px) scale(${reportZoom.scale})`,
-                  transformOrigin: "center center",
-                }}
-              >
               <div className="text-center border-b-2 border-[#1a254f] pb-3 mb-4">
-                <div
-                  contentEditable
-                  suppressContentEditableWarning
-                  data-report-meta="title"
-                  onBlur={flushReportEditsToState}
-                  className="text-[24px] font-[800] text-[#1a254f] outline-none"
-                >
-                  {reportModel.title}
-                </div>
-                <div
-                  contentEditable
-                  suppressContentEditableWarning
-                  data-report-meta="siteName"
-                  onBlur={flushReportEditsToState}
-                  className="text-[14px] text-[#666] mt-1 outline-none"
-                >
-                  {reportModel.siteName}
-                </div>
-                <div
-                  contentEditable
-                  suppressContentEditableWarning
-                  data-report-meta="date"
-                  onBlur={flushReportEditsToState}
-                  className="text-[12px] text-[#666] mt-0.5 outline-none"
-                >
-                  {reportModel.date}
-                </div>
+                <div className="text-[24px] font-[800] text-[#1a254f]">{reportModel.title}</div>
+                <div className="text-[14px] text-[#666] mt-1">{reportModel.siteName}</div>
+                <div className="text-[12px] text-[#666] mt-0.5">{reportModel.date}</div>
               </div>
 
               <table className="w-full border-collapse text-[12px]">
@@ -2840,72 +2355,18 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                         </div>
                       </td>
                       <td className="border border-slate-300 p-2 text-center align-top">
-                        <div className="relative">
-                          <button
-                            type="button"
-                            data-no-pan="1"
-                            disabled={reportIsApproved}
-                            onClick={() => openReportPhotoPicker(row.id, "beforePhoto")}
-                            className={cn(
-                              "w-full h-[64px] flex items-center justify-center bg-transparent border-none p-0",
-                              reportIsApproved ? "opacity-60 cursor-not-allowed" : "cursor-pointer"
-                            )}
-                          >
-                            {row.beforePhoto ? (
-                              <img src={row.beforePhoto} alt="before" className="w-full h-[64px] object-cover rounded" />
-                            ) : (
-                              <span className="text-slate-400 text-[11px]">사진 추가</span>
-                            )}
-                          </button>
-                          {row.beforePhoto && !reportIsApproved && (
-                            <button
-                              type="button"
-                              data-no-pan="1"
-                              data-report-remove="1"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                clearReportPhoto(row.id, "beforePhoto");
-                              }}
-                              className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          )}
-                        </div>
+                        {row.beforePhoto ? (
+                          <img src={row.beforePhoto} alt="before" className="w-full h-[64px] object-cover rounded" />
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
                       </td>
                       <td className="border border-slate-300 p-2 text-center align-top">
-                        <div className="relative">
-                          <button
-                            type="button"
-                            data-no-pan="1"
-                            disabled={reportIsApproved}
-                            onClick={() => openReportPhotoPicker(row.id, "afterPhoto")}
-                            className={cn(
-                              "w-full h-[64px] flex items-center justify-center bg-transparent border-none p-0",
-                              reportIsApproved ? "opacity-60 cursor-not-allowed" : "cursor-pointer"
-                            )}
-                          >
-                            {row.afterPhoto ? (
-                              <img src={row.afterPhoto} alt="after" className="w-full h-[64px] object-cover rounded" />
-                            ) : (
-                              <span className="text-slate-400 text-[11px]">사진 추가</span>
-                            )}
-                          </button>
-                          {row.afterPhoto && !reportIsApproved && (
-                            <button
-                              type="button"
-                              data-no-pan="1"
-                              data-report-remove="1"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                clearReportPhoto(row.id, "afterPhoto");
-                              }}
-                              className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          )}
-                        </div>
+                        {row.afterPhoto ? (
+                          <img src={row.afterPhoto} alt="after" className="w-full h-[64px] object-cover rounded" />
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
                       </td>
                       <td className="border border-slate-300 p-2 text-center font-bold">{statusLabel(row.status)}</td>
                     </tr>
@@ -2915,7 +2376,6 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
             </div>
           </div>
         </div>
-      </div>
       )}
       {/* PATCH END */}
     </div>
@@ -2930,29 +2390,107 @@ interface PreviewModalProps {
 }
 
 function PreviewModal({ file, title, onClose }: PreviewModalProps) {
-  const isImage = file.type === "img";
-  const zoom = useZoomPan<HTMLImageElement>({ minScale: 0.5, maxScale: 4, autoFit: true });
+  const [scale, setScale] = useState(1);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
 
   // Handle keyboard events (ESC to close)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === 'Escape') onClose();
     };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
+  // Handle wheel zoom for desktop
+  const handleWheel = useCallback((e: WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    setScale(prev => Math.max(0.5, Math.min(3, prev * delta)));
+  }, []);
+
+  // Handle pinch zoom for mobile
+  const handleTouchStart = useCallback((e: TouchEvent) => {
+    if (e.touches.length === 2) {
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const distance = Math.sqrt(
+        Math.pow(touch2.clientX - touch1.clientX, 2) + 
+        Math.pow(touch2.clientY - touch1.clientY, 2)
+      );
+      (e.target as any).initialDistance = distance;
+      (e.target as any).initialScale = scale;
+    }
+  }, [scale]);
+
+  const handleTouchMove = useCallback((e: TouchEvent) => {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const distance = Math.sqrt(
+        Math.pow(touch2.clientX - touch1.clientX, 2) + 
+        Math.pow(touch2.clientY - touch1.clientY, 2)
+      );
+      const initialDistance = (e.target as any).initialDistance;
+      const initialScale = (e.target as any).initialScale;
+      if (initialDistance && initialScale) {
+        const newScale = (distance / initialDistance) * initialScale;
+        setScale(Math.max(0.5, Math.min(3, newScale)));
+      }
+    }
+  }, []);
+
+  // Handle mouse drag
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (scale > 1) {
+      setIsDragging(true);
+      setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
+    }
+  }, [scale, position]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (isDragging && scale > 1) {
+      setPosition({
+        x: e.clientX - dragStart.x,
+        y: e.clientY - dragStart.y
+      });
+    }
+  }, [isDragging, dragStart, scale]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  // Add event listeners
   useEffect(() => {
-    if (!isImage) return;
-    const handle = () => zoom.recalcFit();
-    window.addEventListener("resize", handle);
-    return () => window.removeEventListener("resize", handle);
-  }, [isImage, zoom.recalcFit]);
+    const container = containerRef.current;
+    if (container) {
+      container.addEventListener('wheel', handleWheel, { passive: false });
+      container.addEventListener('touchstart', handleTouchStart, { passive: false });
+      container.addEventListener('touchmove', handleTouchMove, { passive: false });
+      
+      return () => {
+        container.removeEventListener('wheel', handleWheel);
+        container.removeEventListener('touchstart', handleTouchStart);
+        container.removeEventListener('touchmove', handleTouchMove);
+      };
+    }
+  }, [handleWheel, handleTouchStart, handleTouchMove]);
+
+  const resetZoom = () => {
+    setScale(1);
+    setPosition({ x: 0, y: 0 });
+  };
 
   return (
     <div className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-sm">
       {/* Header */}
-      <div data-no-pan="1" className="absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-black/50 to-transparent p-4">
+      <div className="absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-black/50 to-transparent p-4">
         <div className="flex items-center justify-between text-white">
           <div className="flex items-center gap-3">
             <button
@@ -2966,7 +2504,7 @@ function PreviewModal({ file, title, onClose }: PreviewModalProps) {
               <p className="text-sm text-white/70">{file.name}</p>
             </div>
           </div>
-
+          
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
@@ -2980,32 +2518,24 @@ function PreviewModal({ file, title, onClose }: PreviewModalProps) {
 
       {/* Content */}
       <div
-        ref={zoom.containerRef}
+        ref={containerRef}
         className="absolute inset-0 flex items-center justify-center p-4 pt-20 pb-16 overflow-hidden"
-        style={{ touchAction: isImage ? "none" : "auto" }}
-        onWheel={isImage ? zoom.onWheel : undefined}
-        onMouseDown={isImage ? zoom.onMouseDown : undefined}
-        onMouseMove={isImage ? zoom.onMouseMove : undefined}
-        onMouseUp={isImage ? zoom.onMouseUp : undefined}
-        onMouseLeave={isImage ? zoom.onMouseLeave : undefined}
-        onTouchStart={isImage ? zoom.onTouchStart : undefined}
-        onTouchMove={isImage ? zoom.onTouchMove : undefined}
-        onTouchEnd={isImage ? zoom.onTouchEnd : undefined}
-        onDoubleClick={isImage ? zoom.onDoubleClick : undefined}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
       >
-        {isImage ? (
+        {file.type === 'img' ? (
           <img
-            ref={zoom.contentRef}
+            ref={imageRef}
             src={file.url}
             alt={file.name}
-            className="select-none max-w-none max-h-none object-contain"
+            className="max-w-full max-h-full object-contain transition-transform duration-200"
             style={{
-              transform: `translate(${zoom.position.x}px, ${zoom.position.y}px) scale(${zoom.scale})`,
-              transformOrigin: "center center",
-              cursor: zoom.canPan ? (zoom.isDragging ? "grabbing" : "grab") : "default",
+              transform: `scale(${scale}) translate(${position.x / scale}px, ${position.y / scale}px)`,
+              cursor: scale > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default'
             }}
             draggable={false}
-            onLoad={() => zoom.recalcFit()}
           />
         ) : (
           <div className="w-full h-full bg-white rounded-lg flex items-center justify-center">
@@ -3014,7 +2544,7 @@ function PreviewModal({ file, title, onClose }: PreviewModalProps) {
               <p className="text-lg font-medium text-gray-600 mb-2">{file.name}</p>
               <p className="text-sm text-gray-500 mb-4">이 파일 형식은 미리보기를 지원하지 않습니다</p>
               <button
-                onClick={() => window.open(file.url, "_blank", "noopener,noreferrer")}
+                onClick={() => window.open(file.url, '_blank', 'noopener,noreferrer')}
                 className="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"
               >
                 외부에서 열기
@@ -3025,43 +2555,31 @@ function PreviewModal({ file, title, onClose }: PreviewModalProps) {
       </div>
 
       {/* Bottom Controls */}
-      {isImage && (
-        <div data-no-pan="1" className="absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/50 to-transparent p-4">
-          <div className="flex items-center justify-center gap-4 text-white">
-            <button
-              data-no-pan="1"
-              onClick={() => zoom.setScale(zoom.scale * 0.85)}
-              className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
-              disabled={zoom.scale <= Math.max(zoom.fitScale, 0.5) + 0.01}
-            >
-              <span className="text-lg font-bold">-</span>
-            </button>
-
-            <span className="text-sm font-medium min-w-[60px] text-center">
-              {Math.round((zoom.scale / (zoom.fitScale || 1)) * 100)}%
-            </span>
-
-            <button
-              data-no-pan="1"
-              onClick={() => zoom.setScale(zoom.scale * 1.15)}
-              className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
-              disabled={zoom.scale >= 4}
-            >
-              <span className="text-lg font-bold">+</span>
-            </button>
-
-            <button
-              data-no-pan="1"
-              onClick={() => zoom.reset()}
-              className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
-              title="화면맞춤"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
-          </div>
+      <div className="absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/50 to-transparent p-4">
+        <div className="flex items-center justify-center gap-4 text-white">
+          <button
+            onClick={() => setScale(prev => Math.max(0.5, prev * 0.8))}
+            className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
+            disabled={scale <= 0.5}
+          >
+            <span className="text-lg font-bold">-</span>
+          </button>
+          
+          <span className="text-sm font-medium min-w-[60px] text-center">
+            {Math.round(scale * 100)}%
+          </span>
+          
+          <button
+            onClick={() => setScale(prev => Math.min(3, prev * 1.25))}
+            className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
+            disabled={scale >= 3}
+          >
+            <span className="text-lg font-bold">+</span>
+          </button>
         </div>
-      )}
-    </div>
+      </div>
+
+          </div>
   );
 }
 
@@ -3328,7 +2846,3 @@ function PunchItemCard({ item, isApproved, onUpdateField, onDelete, onPhotoUploa
     </div>
   );
 }
-
-
-
-
