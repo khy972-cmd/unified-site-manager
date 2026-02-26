@@ -26,7 +26,7 @@ const patchConfirmDocument = (doc: Document) => {
 
   const viewport = doc.getElementById("viewport") as HTMLElement | null;
   if (viewport) {
-    viewport.style.touchAction = "none";
+    viewport.style.touchAction = "pan-x pan-y";
   }
 
   const controls = doc.querySelector<HTMLElement>(".controls-pill");
@@ -37,6 +37,7 @@ const patchConfirmDocument = (doc: Document) => {
 
 export default function CertModal({ isOpen, onClose }: CertModalProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const keepAliveRef = useRef(false);
   const [mounted, setMounted] = useState(isOpen);
   const [visible, setVisible] = useState(false);
   const [frameReady, setFrameReady] = useState(false);
@@ -57,26 +58,28 @@ export default function CertModal({ isOpen, onClose }: CertModalProps) {
   useEffect(() => {
     if (isOpen) {
       setMounted(true);
-      setFrameReady(false);
+      setFrameReady(keepAliveRef.current);
       setFrameError(false);
       const raf = window.requestAnimationFrame(() => setVisible(true));
       return () => window.cancelAnimationFrame(raf);
     }
 
     setVisible(false);
-    const timer = window.setTimeout(() => setMounted(false), SHEET_ANIMATION_MS);
-    return () => window.clearTimeout(timer);
+    if (!keepAliveRef.current) {
+      const timer = window.setTimeout(() => setMounted(false), SHEET_ANIMATION_MS);
+      return () => window.clearTimeout(timer);
+    }
   }, [isOpen]);
 
   useEffect(() => {
-    if (!mounted || typeof document === "undefined") return;
+    if (!isOpen || typeof document === "undefined") return;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
     return () => {
       document.body.style.overflow = prevOverflow;
     };
-  }, [mounted]);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -97,6 +100,7 @@ export default function CertModal({ isOpen, onClose }: CertModalProps) {
       if (!doc) return;
 
       patchConfirmDocument(doc);
+      keepAliveRef.current = true;
       setFrameError(false);
       setFrameReady(true);
     } catch {
@@ -172,6 +176,7 @@ export default function CertModal({ isOpen, onClose }: CertModalProps) {
             className="h-full w-full border-0 bg-black"
             allow="fullscreen"
             loading="eager"
+            fetchPriority="high"
           />
 
           {!frameReady && !frameError && (

@@ -1,24 +1,27 @@
-﻿import { useState, useEffect, useCallback, useMemo } from "react";
+﻿import { useState, useEffect, useMemo } from "react";
 import {
   Search, MapPin, ChevronDown, ChevronUp, Pin, PinOff, Phone, Ruler,
-  Camera, FileCheck2, ClipboardList, CheckCircle2, X, Plus, Map as MapIcon
+  Camera, FileCheck2, ClipboardList, CheckCircle2, X, Plus, Map as MapIcon, Copy
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useWorklogs } from "@/hooks/useSupabaseWorklogs";
 import { usePunchGroups } from "@/hooks/useSupabasePunch";
 import { useUserRole } from "@/hooks/useUserRole";
+import { useSiteLodging } from "@/hooks/useSiteLodging";
 import PartnerSitePage from "@/components/partner/PartnerSitePage";
 import { getPhotosForSite, getDrawingsForSite } from "@/lib/worklogStore";
 import type { WorklogEntry } from "@/lib/worklogStore";
 import type { PunchGroup } from "@/lib/punchStore";
 import DocumentViewer, { WorklogDocument, PhotoGrid, A4Page } from "@/components/viewer/DocumentViewer";
+import { copyText, openAddressInMaps } from "@/lib/mapLinks";
 
 type SiteStatus = "all" | "ing" | "wait" | "done";
 type SortType = "latest" | "name";
 
 interface SiteData {
   id: number;
+  siteDbId?: string | null;
   name: string;
   addr: string;
   lodge: string;
@@ -67,6 +70,42 @@ const FILTERS: { key: SiteStatus; label: string; chipClass: string }[] = [
   { key: "done", label: "완료", chipClass: "status-done" },
 ];
 
+declare global {
+  interface Window {
+    daum?: any;
+  }
+}
+
+let postcodeLoader: Promise<void> | null = null;
+
+function loadDaumPostcode(): Promise<void> {
+  if (typeof window === "undefined") return Promise.reject(new Error("no window"));
+  if (window.daum?.Postcode) return Promise.resolve();
+  if (postcodeLoader) return postcodeLoader;
+  postcodeLoader = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js";
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("postcode load failed"));
+    document.head.appendChild(script);
+  });
+  return postcodeLoader;
+}
+
+async function openDaumPostcode(): Promise<string> {
+  await loadDaumPostcode();
+  return await new Promise((resolve) => {
+    if (!window.daum?.Postcode) return resolve("");
+    new window.daum.Postcode({
+      oncomplete: (data: any) => {
+        resolve(data?.roadAddress || data?.address || data?.jibunAddress || "");
+      },
+      onclose: () => resolve(""),
+    }).open();
+  });
+}
+
 export default function SitePage() {
   const { isPartner } = useUserRole();
   if (isPartner) return <PartnerSitePage />;
@@ -74,6 +113,7 @@ export default function SitePage() {
 }
 
 function WorkerSitePage() {
+  const { isAdmin } = useUserRole();
   const [sites, setSites] = useState<SiteData[]>(INITIAL_SITES);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<SiteStatus>("all");
@@ -81,6 +121,7 @@ function WorkerSitePage() {
   const [sort, setSort] = useState<SortType>("latest");
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [visibleCount, setVisibleCount] = useState(5);
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator !== "undefined" ? navigator.onLine : true));
 
   // Viewer state
   const [viewerOpen, setViewerOpen] = useState(false);
@@ -97,6 +138,18 @@ function WorkerSitePage() {
   // Live worklog & punch data from Supabase
   const { data: worklogs = [] } = useWorklogs();
   const { data: allPunchGroups = [] } = usePunchGroups();
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onOnline = () => setIsOnline(true);
+    const onOffline = () => setIsOnline(false);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, []);
 
   // Enrich sites with live worklog data
   const enrichedSites = useMemo(() => {
@@ -116,8 +169,10 @@ function WorkerSitePage() {
       });
       const punchItems = sitePunch.flatMap(g => g.punchItems || []);
       const openPunch = punchItems.filter(i => i.status !== 'done').length;
+      const siteDbId = siteLogs[0]?.siteValue || null;
       return {
         ...site,
+        siteDbId,
         hasLog: site.hasLog || siteLogs.length > 0,
         hasPhoto: site.hasPhoto || siteLogs.some(l => l.photoCount > 0),
         hasDraw: site.hasDraw || siteLogs.some(l => l.drawingCount > 0),
@@ -383,18 +438,20 @@ function WorkerSitePage() {
           </button>
         ))}
 
-        {/* direct-registration toggle */}
-        <button
-          onClick={() => { setOnlyDirect(d => !d); setVisibleCount(5); }}
-          className={cn(
-            "h-10 px-3.5 rounded-full text-sm-app font-medium whitespace-nowrap flex-shrink-0 border transition-all cursor-pointer flex items-center justify-center",
-            onlyDirect
-              ? "bg-red-500 text-white border-red-500 font-bold shadow-sm"
-              : "bg-card text-muted-foreground border-border hover:border-primary/50"
-          )}
-        >
-          직접등록만
-        </button>
+        {/* direct-registration toggle (admin only) */}
+        {isAdmin && (
+          <button
+            onClick={() => { setOnlyDirect(d => !d); setVisibleCount(5); }}
+            className={cn(
+              "h-10 px-3.5 rounded-full text-sm-app font-medium whitespace-nowrap flex-shrink-0 border transition-all cursor-pointer flex items-center justify-center",
+              onlyDirect
+                ? "bg-red-500 text-white border-red-500 font-bold shadow-sm"
+                : "bg-card text-muted-foreground border-border hover:border-primary/50"
+            )}
+          >
+            직접등록만
+          </button>
+        )}
       </div>
 
       {/* Empty state */}
@@ -473,24 +530,39 @@ function WorkerSitePage() {
                 <div className="flex items-center justify-between pt-1">
                   <div
                     className="flex items-center gap-1.5 flex-1 overflow-hidden cursor-pointer"
-                    onClick={() => hasAddr ? window.open(`https://www.tmap.co.kr/`) : toast.error("현장 주소 데이터가 없습니다")}
+                    onClick={() => openAddressInMaps(site.addr, { label: "현장 주소" })}
                   >
                     <MapPin className="w-4 h-4 text-text-sub flex-shrink-0" />
                     <span className={cn("text-base-app font-bold truncate", hasAddr ? "text-text-sub" : "text-muted-foreground")}>
                       {hasAddr ? site.addr : "데이터 없음"}
                     </span>
                   </div>
-                  <button
-                    className={cn(
-                      "w-9 h-9 max-[640px]:w-8 max-[640px]:h-8 rounded-[10px] flex items-center justify-center shrink-0 ml-2 transition-all active:scale-95",
-                      hasAddr
-                        ? "bg-[hsl(219_100%_95%)] border border-[hsl(219_100%_90%)] text-[hsl(230_60%_30%)]"
-                        : "border border-dashed border-muted-foreground/40 text-muted-foreground bg-transparent opacity-90"
-                    )}
-                    onClick={() => hasAddr ? window.open(`https://www.tmap.co.kr/`) : toast.error("유효한 주소가 없습니다")}
-                  >
-                    <MapPin className="w-[18px] h-[18px]" />
-                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                    <button
+                      disabled={!hasAddr}
+                      className={cn(
+                        "w-9 h-9 max-[640px]:w-8 max-[640px]:h-8 rounded-[10px] flex items-center justify-center transition-all active:scale-95",
+                        hasAddr
+                          ? "bg-muted border border-border text-text-sub"
+                          : "border border-dashed border-muted-foreground/40 text-muted-foreground bg-transparent opacity-60 cursor-not-allowed"
+                      )}
+                      onClick={() => copyText(site.addr, "현장 주소")}
+                    >
+                      <Copy className="w-[16px] h-[16px]" />
+                    </button>
+                    <button
+                      disabled={!hasAddr}
+                      className={cn(
+                        "w-9 h-9 max-[640px]:w-8 max-[640px]:h-8 rounded-[10px] flex items-center justify-center transition-all active:scale-95",
+                        hasAddr
+                          ? "bg-[hsl(219_100%_95%)] border border-[hsl(219_100%_90%)] text-[hsl(230_60%_30%)]"
+                          : "border border-dashed border-muted-foreground/40 text-muted-foreground bg-transparent opacity-60 cursor-not-allowed"
+                      )}
+                      onClick={() => openAddressInMaps(site.addr, { label: "현장 주소" })}
+                    >
+                      <MapPin className="w-[18px] h-[18px]" />
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -520,23 +592,7 @@ function WorkerSitePage() {
                   ))}
 
                   {/* Lodge */}
-                  <div className="flex justify-between items-center py-3 max-[640px]:py-2.5 border-b border-dashed border-border">
-                    <span className="text-base-app text-text-sub font-bold w-20">숙소</span>
-                    <div className="flex items-center gap-2 flex-1 justify-end">
-                      <span className="text-base-app font-semibold text-foreground truncate pr-3 text-right cursor-pointer" style={{ maxWidth: "60%" }}>
-                        {site.lodge || <span className="text-primary underline">주소 찾기</span>}
-                      </span>
-                      <button
-                        className={cn(
-                          "w-9 h-9 max-[640px]:w-8 max-[640px]:h-8 rounded-[10px] flex items-center justify-center shrink-0 transition-all active:scale-95",
-                          site.lodge ? "bg-[hsl(219_100%_95%)] border border-[hsl(219_100%_90%)] text-[hsl(230_60%_30%)]" : "border border-dashed border-primary text-primary bg-transparent"
-                        )}
-                        onClick={() => site.lodge ? window.open(`https://www.tmap.co.kr/`) : toast("주소 찾기 (준비 중)")}
-                      >
-                        <MapPin className="w-[18px] h-[18px]" />
-                      </button>
-                    </div>
-                  </div>
+                  <LodgeRow site={site} isOnline={isOnline} />
 
                   {/* Stats */}
                   <div className="flex py-3 max-[640px]:py-2.5">
@@ -638,3 +694,74 @@ function WorkerSitePage() {
     </div>
   );
 }
+
+function LodgeRow({ site, isOnline }: { site: SiteData; isOnline: boolean }) {
+  const { lodge, canView, canEdit, isSaving, saveLodge } = useSiteLodging(site.siteDbId);
+  if (!canView) return null;
+
+  const lodgeValue = lodge || "";
+  const hasLodge = !!lodgeValue.trim();
+
+  const handleSearch = async () => {
+    if (!isOnline) {
+      toast.error("온라인에서 주소찾기가 가능합니다.");
+      return;
+    }
+    if (!canEdit || isSaving) return;
+    try {
+      const addr = await openDaumPostcode();
+      if (!addr) return;
+      try {
+        await saveLodge(addr);
+        toast.success("숙소 주소가 저장되었습니다.");
+      } catch {
+        // error toast handled in hook
+      }
+    } catch {
+      toast.error("주소찾기에 실패했습니다.");
+    }
+  };
+
+  return (
+    <div className="flex justify-between items-center py-3 max-[640px]:py-2.5 border-b border-dashed border-border">
+      <span className="text-base-app text-text-sub font-bold w-20">숙소</span>
+      <div className="flex items-center gap-2 flex-1 justify-end">
+        <input
+          value={lodgeValue}
+          readOnly
+          placeholder={isOnline ? "주소 찾기" : "오프라인"}
+          onClick={() => hasLodge && openAddressInMaps(lodgeValue, { label: "숙소 주소" })}
+          className={cn(
+            "text-base-app font-semibold text-foreground truncate pr-3 text-right bg-transparent border-none outline-none",
+            hasLodge && "cursor-pointer"
+          )}
+          style={{ maxWidth: "60%" }}
+        />
+        <button
+          disabled={!hasLodge}
+          className={cn(
+            "w-9 h-9 max-[640px]:w-8 max-[640px]:h-8 rounded-[10px] flex items-center justify-center shrink-0 transition-all active:scale-95",
+            hasLodge
+              ? "bg-muted border border-border text-text-sub"
+              : "border border-dashed border-muted-foreground/40 text-muted-foreground bg-transparent opacity-60 cursor-not-allowed"
+          )}
+          onClick={() => copyText(lodgeValue, "숙소 주소")}
+        >
+          <Copy className="w-[16px] h-[16px]" />
+        </button>
+        <button
+          disabled={!isOnline || !canEdit || isSaving}
+          className={cn(
+            "w-9 h-9 max-[640px]:w-8 max-[640px]:h-8 rounded-[10px] flex items-center justify-center shrink-0 transition-all active:scale-95",
+            hasLodge ? "bg-[hsl(219_100%_95%)] border border-[hsl(219_100%_90%)] text-[hsl(230_60%_30%)]" : "border border-dashed border-primary text-primary bg-transparent",
+            (!isOnline || !canEdit || isSaving) && "opacity-50 cursor-not-allowed"
+          )}
+          onClick={() => hasLodge ? openAddressInMaps(lodgeValue, { label: "숙소 주소" }) : handleSearch()}
+        >
+          <MapPin className="w-[18px] h-[18px]" />
+        </button>
+      </div>
+    </div>
+  );
+}
+

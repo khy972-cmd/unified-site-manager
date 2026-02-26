@@ -549,6 +549,8 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
   const reportPhotoInputRef = useRef<HTMLInputElement>(null);
   const [reportPhotoTarget, setReportPhotoTarget] = useState<{ itemId: string; field: "beforePhoto" | "afterPhoto" } | null>(null);
   const reportZoom = useZoomPan<HTMLDivElement>({ minScale: 0.5, maxScale: 4, autoFit: true });
+  const REPORT_HEADER_PX = 56;
+  const REPORT_TOOLBAR_PX = 48;
   // PATCH END
 
   // Supabase-backed punch data
@@ -787,11 +789,26 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
 
   useEffect(() => {
     if (!reportEditorOpen) return;
-    const handle = () => reportZoom.recalcFit();
-    requestAnimationFrame(handle);
+    const handle = () => {
+      const container = reportZoom.containerRef.current;
+      const content = reportZoom.contentRef.current;
+      if (!container || !content) return;
+      const styles = window.getComputedStyle(container);
+      const paddingX = (parseFloat(styles.paddingLeft || "0") || 0) + (parseFloat(styles.paddingRight || "0") || 0);
+      const available = Math.max(0, container.clientWidth - paddingX);
+      const next = available / content.offsetWidth;
+      if (Number.isFinite(next) && next > 0) reportZoom.reset(next);
+    };
+    const handleOrientation = () => window.setTimeout(handle, 60);
+    const raf = window.requestAnimationFrame(handle);
     window.addEventListener("resize", handle);
-    return () => window.removeEventListener("resize", handle);
-  }, [reportEditorOpen, reportZoom.recalcFit]);
+    window.addEventListener("orientationchange", handleOrientation);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.removeEventListener("resize", handle);
+      window.removeEventListener("orientationchange", handleOrientation);
+    };
+  }, [reportEditorOpen, reportZoom.reset]);
 
   // PATCH START: report editor overlay actions
   const statusLabel = (s: PunchItem["status"]) => (s === "done" ? "완료" : s === "ing" ? "진행중" : "미조치");
@@ -955,8 +972,16 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     const container = reportZoom.containerRef.current;
     const content = reportZoom.contentRef.current;
     if (!container || !content) return;
-    const next = container.clientWidth / content.offsetWidth;
-    reportZoom.reset(next);
+    const styles = window.getComputedStyle(container);
+    const paddingX = (parseFloat(styles.paddingLeft || "0") || 0) + (parseFloat(styles.paddingRight || "0") || 0);
+    const available = Math.max(0, container.clientWidth - paddingX);
+    const next = available / content.offsetWidth;
+    if (Number.isFinite(next) && next > 0) reportZoom.reset(next);
+  }, [reportZoom]);
+
+  const onReportWheel = useCallback((e: React.WheelEvent) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    reportZoom.onWheel(e);
   }, [reportZoom]);
 
   const loadScript = useCallback((src: string) => {
@@ -2007,8 +2032,8 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
             <div className="space-y-3 max-[640px]:space-y-2.5">
               {filteredBlueprintSites.length === 0 ? (
                 <div className="text-center py-20">
-                  <div className="inline-flex items-center justify-center w-20 h-20 bg-muted rounded-full mb-5">
-                    <FileText className="w-8 h-8 text-muted-foreground opacity-60" />
+                  <div className="inline-flex items-center justify-center w-[60px] h-[60px] bg-muted rounded-full mb-5 max-[640px]:w-[48px] max-[640px]:h-[48px]">
+                    <FileText className="w-6 h-6 max-[640px]:w-5 max-[640px]:h-5 text-muted-foreground opacity-60" />
                   </div>
                   <p className="text-base font-medium text-muted-foreground mb-2">
                     {search.trim() ? "검색 결과가 없습니다" : "등록된 도면이 없습니다"}
@@ -2058,8 +2083,8 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                         {isSelected && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
                       </button>
 
-                      <div className="w-20 h-20 max-[640px]:w-16 max-[640px]:h-16 rounded-xl bg-muted border border-border overflow-hidden shrink-0 flex items-center justify-center">
-                        <FileText className="w-8 h-8 max-[640px]:w-7 max-[640px]:h-7 text-blue-500" />
+                      <div className="w-[64px] h-[64px] max-[640px]:w-[60px] max-[640px]:h-[60px] rounded-xl bg-muted border border-border overflow-hidden shrink-0 flex items-center justify-center">
+                        <FileText className="w-6 h-6 max-[640px]:w-5 max-[640px]:h-5 text-blue-500" />
                       </div>
 
                       <div
@@ -2679,8 +2704,15 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
 
       {/* PATCH START: report editor overlay UI */}
       {reportEditorOpen && reportModel && (
-        <div id="reportEditorOverlay" className="fixed inset-0 bg-[#1e1e1e] z-[9999] flex flex-col max-w-[600px] mx-auto">
-          <div className="h-14 px-4 border-b border-[#333] flex justify-between items-center bg-black shrink-0">
+          <div id="reportEditorOverlay" className="fixed inset-0 bg-[#1e1e1e] z-[9999] flex flex-col max-w-[600px] mx-auto">
+            <div
+              className="px-4 border-b border-[#333] flex justify-between items-center bg-black shrink-0"
+              style={{
+                height: `calc(${REPORT_HEADER_PX}px + env(safe-area-inset-top))`,
+                paddingTop: "env(safe-area-inset-top)",
+                boxSizing: "border-box",
+              }}
+            >
             <button onClick={closeReportEditor} className="bg-transparent border-none text-white cursor-pointer p-1">
               <ArrowLeft className="w-6 h-6" />
             </button>
@@ -2699,11 +2731,12 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
             onChange={onReportPhotoChange}
           />
 
-          <div className="flex-1 bg-[#333] relative overflow-hidden">
-            <div
-              data-no-pan="1"
-              className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 bg-black/60 text-white rounded-full px-3 py-1"
-            >
+          <div
+            data-no-pan="1"
+            className="shrink-0 bg-black/80 border-b border-[#222]"
+            style={{ height: REPORT_TOOLBAR_PX }}
+          >
+            <div className="h-full px-3 flex items-center gap-2 overflow-x-auto whitespace-nowrap">
               <button
                 data-no-pan="1"
                 onClick={() => reportZoom.setScale(reportZoom.scale * 0.9)}
@@ -2732,20 +2765,25 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
               <button
                 data-no-pan="1"
                 onClick={fitReportWidth}
-                className="px-2 py-1 rounded-full bg-white/10 hover:bg-white/20 text-[11px] font-semibold"
+                className="px-2 py-1 rounded-full bg-white/10 hover:bg-white/20 text-[11px] font-semibold whitespace-nowrap"
               >
                 Fit W
               </button>
             </div>
+          </div>
 
+          <div
+            className="bg-[#333] relative overflow-hidden"
+            style={{ height: `calc(100dvh - ${REPORT_HEADER_PX}px - ${REPORT_TOOLBAR_PX}px - env(safe-area-inset-top))` }}
+          >
             <div
               ref={reportZoom.containerRef}
-              className="w-full h-full flex items-center justify-center p-4"
+              className="w-full h-full flex items-start justify-center px-3 py-2"
               style={{
                 touchAction: "none",
                 cursor: reportZoom.canPan ? (reportZoom.isDragging ? "grabbing" : "grab") : "default",
               }}
-              onWheel={reportZoom.onWheel}
+              onWheel={onReportWheel}
               onMouseDown={reportZoom.onMouseDown}
               onMouseMove={reportZoom.onMouseMove}
               onMouseUp={reportZoom.onMouseUp}
@@ -2756,20 +2794,26 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
               onDoubleClick={reportZoom.onDoubleClick}
             >
               <div
-                ref={(node) => {
-                  reportContentRef.current = node;
-                  reportZoom.contentRef.current = node;
-                }}
-                className="bg-white shadow-lg"
+                className="w-full h-full flex items-start justify-center"
                 style={{
-                  width: "210mm",
-                  minHeight: "297mm",
-                  padding: "20mm 10mm",
-                  boxSizing: "border-box",
                   transform: `translate(${reportZoom.position.x}px, ${reportZoom.position.y}px) scale(${reportZoom.scale})`,
-                  transformOrigin: "center center",
+                  transformOrigin: "top center",
+                  willChange: "transform",
                 }}
               >
+                <div
+                  ref={(node) => {
+                    reportContentRef.current = node;
+                    reportZoom.contentRef.current = node;
+                  }}
+                  className="bg-white shadow-lg"
+                  style={{
+                    width: "210mm",
+                    minHeight: "297mm",
+                    padding: "20mm 10mm",
+                    boxSizing: "border-box",
+                  }}
+                >
               <div className="text-center border-b-2 border-[#1a254f] pb-3 mb-4">
                 <div
                   contentEditable
@@ -2800,7 +2844,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                 </div>
               </div>
 
-              <table className="w-full border-collapse text-[12px]">
+              <table className="w-full border-collapse text-[12px] [table-layout:fixed] [&_th]:align-middle [&_td]:align-middle [&_th]:box-border [&_td]:box-border [&_th]:leading-[1.4] [&_td]:leading-[1.4] [&_td]:break-words [&_td]:whitespace-pre-wrap">
                 <thead>
                   <tr className="bg-slate-100">
                     <th className="border border-slate-300 p-2 w-10">NO</th>
@@ -2815,7 +2859,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                   {reportModel.rows.map((row, idx) => (
                     <tr key={row.id}>
                       <td className="border border-slate-300 p-2 text-center font-bold">{idx + 1}</td>
-                      <td className="border border-slate-300 p-2 align-top">
+                      <td className="border border-slate-300 p-2 align-middle">
                         <div
                           contentEditable
                           suppressContentEditableWarning
@@ -2827,7 +2871,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                           {row.location || ""}
                         </div>
                       </td>
-                      <td className="border border-slate-300 p-2 align-top">
+                      <td className="border border-slate-300 p-2 align-middle">
                         <div
                           contentEditable
                           suppressContentEditableWarning
@@ -2839,7 +2883,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                           {row.issue || ""}
                         </div>
                       </td>
-                      <td className="border border-slate-300 p-2 text-center align-top">
+                      <td className="border border-slate-300 p-2 text-center align-middle">
                         <div className="relative">
                           <button
                             type="button"
@@ -2852,7 +2896,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                             )}
                           >
                             {row.beforePhoto ? (
-                              <img src={row.beforePhoto} alt="before" className="w-full h-[64px] object-cover rounded" />
+                              <img src={row.beforePhoto} alt="before" className="w-full max-h-[64px] h-auto object-contain rounded" />
                             ) : (
                               <span className="text-slate-400 text-[11px]">사진 추가</span>
                             )}
@@ -2873,7 +2917,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                           )}
                         </div>
                       </td>
-                      <td className="border border-slate-300 p-2 text-center align-top">
+                      <td className="border border-slate-300 p-2 text-center align-middle">
                         <div className="relative">
                           <button
                             type="button"
@@ -2886,7 +2930,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                             )}
                           >
                             {row.afterPhoto ? (
-                              <img src={row.afterPhoto} alt="after" className="w-full h-[64px] object-cover rounded" />
+                              <img src={row.afterPhoto} alt="after" className="w-full max-h-[64px] h-auto object-contain rounded" />
                             ) : (
                               <span className="text-slate-400 text-[11px]">사진 추가</span>
                             )}
@@ -2916,6 +2960,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
           </div>
         </div>
       </div>
+    </div>
       )}
       {/* PATCH END */}
     </div>
@@ -3328,7 +3373,3 @@ function PunchItemCard({ item, isApproved, onUpdateField, onDelete, onPhotoUploa
     </div>
   );
 }
-
-
-
-

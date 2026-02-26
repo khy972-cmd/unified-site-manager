@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect, useCallback } from "react";
+import { toast } from "sonner";
 import {
   getAllWorklogs, saveWorklog as localSaveWorklog,
   updateWorklogStatus as localUpdateStatus,
@@ -55,7 +56,19 @@ function mapToWorklogEntry(row: any): WorklogEntry {
 }
 
 // ─── Find or create site ───
-async function findOrCreateSite(siteName: string, userId: string): Promise<string> {
+async function canCreateSite(userId: string, allowCreate: boolean) {
+  if (allowCreate) return true;
+  const { data, error } = await supabase.rpc("has_role", { _role: "admin", _user_id: userId });
+  if (!error) return !!data;
+  const { data: roleRow } = await supabase
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return roleRow?.role === "admin";
+}
+
+async function findOrCreateSite(siteName: string, userId: string, allowCreate: boolean): Promise<string> {
   // Try to find existing site
   const { data: existing } = await supabase
     .from("sites")
@@ -65,6 +78,11 @@ async function findOrCreateSite(siteName: string, userId: string): Promise<strin
     .single();
 
   if (existing) return existing.id;
+
+  const isAdmin = await canCreateSite(userId, allowCreate);
+  if (!isAdmin) {
+    throw new Error("현장 등록은 본사관리자만 가능합니다. 기존 현장을 선택하세요.");
+  }
 
   // Create new site
   const { data: newSite, error } = await supabase
@@ -144,7 +162,7 @@ export function useWorklogs() {
 }
 
 export function useSaveWorklog() {
-  const { user } = useAuth();
+  const { user, isTestMode, testRole } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -163,6 +181,10 @@ export function useSaveWorklog() {
       weather?: string;
     }) => {
       if (!user) {
+        if (isTestMode && testRole !== "admin" && !entry.siteValue) {
+          toast.error("현장 등록은 본사관리자만 가능합니다. 기존 현장을 선택하세요.");
+          throw new Error("현장 등록은 본사관리자만 가능합니다. 기존 현장을 선택하세요.");
+        }
         // Fallback to localStorage
         return localSaveWorklog({
           ...entry,
@@ -171,7 +193,17 @@ export function useSaveWorklog() {
         });
       }
 
-      const siteId = await findOrCreateSite(entry.siteName, user.id);
+      let siteId: string;
+      try {
+        const allowCreate = isTestMode && testRole === "admin";
+        siteId = await findOrCreateSite(entry.siteName, user.id, allowCreate);
+      } catch (err: any) {
+        const message = err?.message || "현장 등록 중 오류가 발생했습니다.";
+        if (message.includes("현장 등록은 본사관리자만 가능합니다")) {
+          toast.error(message);
+        }
+        throw err;
+      }
 
       // Insert worklog
       const { data: worklog, error: wlError } = await supabase
