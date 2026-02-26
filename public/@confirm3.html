@@ -5,18 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=0.5, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
   <title>작업완료확인서 - 최종 수정본</title> 
 
-  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
-  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <!-- 외부 CDN 제거: 로컬 vendor 경로에서 로드 (오프라인 대응) -->
+  <!-- Pretendard CDN 제거: 시스템 폰트로 fallback -->
+  <!-- lucide/signature_pad/html2canvas/jsPDF는 하단 로더에서 /vendor 경로로 로드 -->
 
   <style>
     /* =========================================
        MODULE: CORE STYLES
        ========================================= */
     :root {
-        --font-main: "Pretendard Variable", Pretendard, sans-serif;
+        --font-main: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
         --bg-viewer: #1e1e1e; 
         --bg-paper: #ffffff;
         --border-color: #1e293b;
@@ -26,6 +24,8 @@
         --header-navy: #1a254f;
         --primary: #31a3fa;
         --primary-bg: #eaf6ff;
+        --info-col-label: 12%;
+        --info-col-label-2: 10%;
     }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     
@@ -59,6 +59,10 @@
         padding: 8px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
     }
     .icon-btn:hover { background: rgba(255,255,255,0.15); }
+    .icon-btn svg, .ctrl-btn svg, .mini-btn svg, .uu-btn svg, .toast svg {
+        width: 20px; height: 20px; flex-shrink: 0;
+    }
+    svg { vector-effect: non-scaling-stroke; }
 
     /* =========================================
        MODULE: VIEWER (Layout Fixed)
@@ -69,7 +73,7 @@
         display: flex; 
         justify-content: center; 
         align-items: center;     
-        touch-action: none; 
+        touch-action: pan-x pan-y; 
         cursor: default;
     }
     .viewport.panning { cursor: grab !important; }
@@ -98,6 +102,9 @@
     .info-table { width: 100%; border-collapse: collapse; border: 2px solid var(--border-color); margin-bottom: 20px; table-layout: fixed; }
     .info-table th, .info-table td { border: 1px solid var(--border-color); padding: 8px; vertical-align: middle; }
     .info-table th { background: #f8fafc; font-weight: 800; text-align: center; font-size: 16px; color: #334155; word-break: keep-all; }
+    .info-table col.info-col-label { width: var(--info-col-label); }
+    .info-table col.info-col-label-2 { width: var(--info-col-label-2); }
+    .info-table col.info-col-value { width: auto; }
 
     /* Table 내부 입력창 스타일 (Textarea) */
     .table-input {
@@ -282,7 +289,7 @@
     }
     #modalEditingImage {
         position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-        cursor: grab; touch-action: none; max-width: none;
+        cursor: grab; touch-action: none; max-width: 100%; max-height: 100%; object-fit: contain;
     }
     .modal-edit-controls {
         position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -335,10 +342,10 @@
 
         <table class="info-table">
             <colgroup>
-                <col style="width: 12%;">
-                <col style="width: 48%;">
-                <col style="width: 10%;">
-                <col style="width: 30%;">
+                <col class="info-col-label">
+                <col class="info-col-value">
+                <col class="info-col-label info-col-label-2">
+                <col class="info-col-value">
             </colgroup>
             
             <tr>
@@ -400,6 +407,7 @@
 
   <div class="controls-pill">
     <button class="ctrl-btn" id="btnZoomOut"><i data-lucide="minus"></i>축소</button>
+    <button class="ctrl-btn" id="btnFit"><i data-lucide="scan"></i>맞춤</button>
     <button class="ctrl-btn" id="btnPanToggle"><i data-lucide="hand"></i>이동</button>
     <button class="ctrl-btn" id="btnZoomIn"><i data-lucide="plus"></i>확대</button>
     <button class="ctrl-btn" id="btnShare"><i data-lucide="share-2"></i>공유</button>
@@ -421,7 +429,7 @@
                   </div>
                   <div class="modal-edit-controls">
                       <span style="color:#fff; font-size:12px; white-space:nowrap;">크기</span>
-                      <input type="range" id="modalScaleSlider" min="0.1" max="2.0" step="0.05" value="0.5" style="flex:1;">
+                      <input type="range" id="modalScaleSlider" min="0.2" max="2.0" step="0.05" value="1" style="flex:1;">
                       <button class="mini-btn" id="btnEditCancel">취소</button>
                       <button class="mini-btn active" id="btnEditApply">적용</button>
                   </div>
@@ -444,7 +452,198 @@
       </div>
   </div>
 
-<script>
+  <script>
+      const VENDOR_SCRIPTS = {
+          lucide: {
+              local: "./vendor/lucide.min.js",
+              cdn: "https://unpkg.com/lucide@latest/dist/umd/lucide.js"
+          },
+          signaturePad: {
+              local: "./vendor/signature_pad.umd.min.js",
+              cdn: "https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"
+          },
+          html2canvas: {
+              local: "./vendor/html2canvas.min.js",
+              cdn: "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"
+          },
+          jspdf: {
+              local: "./vendor/jspdf.umd.min.js",
+              cdn: "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
+          }
+      };
+
+      const loadScriptOnce = (src) => new Promise((resolve, reject) => {
+          const existing = document.querySelector(`script[src="${src}"]`);
+          if (existing) {
+              existing.addEventListener("load", () => resolve(), { once: true });
+              existing.addEventListener("error", () => reject(new Error(`Failed to load ${src}`)), { once: true });
+              return;
+          }
+          const script = document.createElement("script");
+          script.src = src;
+          script.async = true;
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error(`Failed to load ${src}`));
+          document.head.appendChild(script);
+      });
+
+      const loadScriptWithFallback = async (localSrc, cdnSrc) => {
+          try {
+              await loadScriptOnce(localSrc);
+          } catch (e) {
+              if (!cdnSrc) throw e;
+              await loadScriptOnce(cdnSrc);
+          }
+      };
+
+      const ensureUiLibs = async () => {
+          const tasks = [];
+          if (!window.lucide) tasks.push(loadScriptWithFallback(VENDOR_SCRIPTS.lucide.local, VENDOR_SCRIPTS.lucide.cdn));
+          if (!window.SignaturePad) tasks.push(loadScriptWithFallback(VENDOR_SCRIPTS.signaturePad.local, VENDOR_SCRIPTS.signaturePad.cdn));
+          if (!tasks.length) return;
+          try {
+              await Promise.all(tasks);
+          } catch (e) {
+              console.warn("UI vendor libs load failed:", e);
+          }
+      };
+
+      const installLucideFallback = () => {
+          if (window.lucide && typeof window.lucide.createIcons === "function") return;
+          const iconMap = {
+              "chevron-left": '<polyline points="15 18 9 12 15 6"></polyline>',
+              "rotate-ccw": '<polyline points="1 4 1 10 7 10"></polyline><path d="M3.5 15a9 9 0 1 0 2-9.5"></path>',
+              "download": '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line>',
+              "minus": '<line x1="5" y1="12" x2="19" y2="12"></line>',
+              "scan": '<polyline points="3 8 3 3 8 3"></polyline><polyline points="16 3 21 3 21 8"></polyline><polyline points="21 16 21 21 16 21"></polyline><polyline points="8 21 3 21 3 16"></polyline>',
+              "hand": '<path d="M7 11V6a2 2 0 0 1 4 0v5"></path><path d="M11 11V4a2 2 0 1 1 4 0v7"></path><path d="M15 11V6a2 2 0 1 1 4 0v8"></path><path d="M7 11l-2 2a4 4 0 0 0 4 6h7a4 4 0 0 0 4-4v-4"></path>',
+              "plus": '<line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line>',
+              "share-2": '<circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.7" y1="10.7" x2="15.3" y2="6.3"></line><line x1="8.7" y1="13.3" x2="15.3" y2="17.7"></line>',
+              "check": '<polyline points="20 6 9 17 4 12"></polyline>',
+              "x": '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>',
+              "pen-tool": '<path d="M12 19l7-7 3 3-7 7-3 1z"></path><path d="M16 5l3 3"></path>',
+              "eraser": '<path d="M3 17l6 6h10"></path><path d="M15 5l6 6-10 10H5L3 19l12-14z"></path>',
+              "image-plus": '<rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="M21 15l-5-5L5 21"></path><line x1="12" y1="7" x2="12" y2="13"></line><line x1="9" y1="10" x2="15" y2="10"></line>',
+              "undo-2": '<path d="M9 14 4 9l5-5"></path><path d="M20 20a8 8 0 0 0-8-8H4"></path>',
+              "trash-2": '<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>'
+          };
+          window.lucide = {
+              createIcons: () => {
+                  document.querySelectorAll("i[data-lucide]").forEach((el) => {
+                      const name = el.getAttribute("data-lucide");
+                      const markup = iconMap[name];
+                      if (!markup) return;
+                      const size = el.getAttribute("size") || el.getAttribute("width") || "24";
+                      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                      svg.setAttribute("viewBox", "0 0 24 24");
+                      svg.setAttribute("width", size);
+                      svg.setAttribute("height", size);
+                      svg.setAttribute("fill", "none");
+                      svg.setAttribute("stroke", "currentColor");
+                      svg.setAttribute("stroke-width", "2");
+                      svg.setAttribute("stroke-linecap", "round");
+                      svg.setAttribute("stroke-linejoin", "round");
+                      svg.innerHTML = markup;
+                      el.replaceWith(svg);
+                  });
+              }
+          };
+      };
+
+      const installSignaturePadFallback = () => {
+          if (window.SignaturePad) return;
+          class SimpleSignaturePad {
+              constructor(canvas, options = {}) {
+                  this.canvas = canvas;
+                  this.ctx = canvas.getContext("2d");
+                  this.minWidth = options.minWidth || 1;
+                  this.maxWidth = options.maxWidth || 3;
+                  this.penColor = options.penColor || "#000";
+                  this.compositeOperation = "source-over";
+                  this._data = [];
+                  this._drawing = false;
+                  this._current = null;
+                  this._bind();
+              }
+              _bind() {
+                  this.canvas.addEventListener("pointerdown", (e) => this._start(e));
+                  this.canvas.addEventListener("pointermove", (e) => this._move(e));
+                  document.addEventListener("pointerup", () => this._end());
+                  document.addEventListener("pointercancel", () => this._end());
+              }
+              _point(e) {
+                  const rect = this.canvas.getBoundingClientRect();
+                  return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+              }
+              _start(e) {
+                  e.preventDefault();
+                  this._drawing = true;
+                  this._current = [];
+                  this._data.push(this._current);
+                  this._addPoint(this._point(e));
+              }
+              _move(e) {
+                  if (!this._drawing) return;
+                  e.preventDefault();
+                  this._addPoint(this._point(e));
+              }
+              _end() {
+                  this._drawing = false;
+                  this._current = null;
+              }
+              _addPoint(p) {
+                  if (!this._current) return;
+                  this._current.push(p);
+                  const ctx = this.ctx;
+                  ctx.strokeStyle = this.penColor;
+                  ctx.lineWidth = this.maxWidth;
+                  ctx.lineCap = "round";
+                  ctx.lineJoin = "round";
+                  ctx.globalCompositeOperation = this.compositeOperation;
+                  const len = this._current.length;
+                  const prev = len > 1 ? this._current[len - 2] : p;
+                  ctx.beginPath();
+                  ctx.moveTo(prev.x, prev.y);
+                  ctx.lineTo(p.x, p.y);
+                  ctx.stroke();
+              }
+              clear() {
+                  this._data = [];
+                  this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+              }
+              isEmpty() {
+                  return this._data.length === 0;
+              }
+              toData() {
+                  return JSON.parse(JSON.stringify(this._data));
+              }
+              fromData(data) {
+                  this.clear();
+                  if (!Array.isArray(data)) return;
+                  this._data = data.map(stroke => Array.isArray(stroke) ? stroke.map(p => ({ x: p.x, y: p.y })) : []);
+                  this._redraw();
+              }
+              _redraw() {
+                  const ctx = this.ctx;
+                  ctx.strokeStyle = this.penColor;
+                  ctx.lineWidth = this.maxWidth;
+                  ctx.lineCap = "round";
+                  ctx.lineJoin = "round";
+                  ctx.globalCompositeOperation = this.compositeOperation;
+                  this._data.forEach(stroke => {
+                      for (let i = 1; i < stroke.length; i += 1) {
+                          const a = stroke[i - 1];
+                          const b = stroke[i];
+                          ctx.beginPath();
+                          ctx.moveTo(a.x, a.y);
+                          ctx.lineTo(b.x, b.y);
+                          ctx.stroke();
+                      }
+                  });
+              }
+          }
+          window.SignaturePad = SimpleSignaturePad;
+      };
     /* UI 유틸리티 */
     class UiUtils {
         constructor() {
@@ -468,7 +667,12 @@
             this.paperWrapper = document.getElementById('paperWrapper');
             this.btnPan = document.getElementById('btnPanToggle');
             this.zoomLevel = 1.0;
+            this.minZoom = 0.2;
+            this.maxZoom = 3.0;
             this.isPanning = false; 
+            this.isPinching = false;
+            this.pinchStartDist = 0;
+            this.pinchStartZoom = 1;
             this.startX = 0; this.startY = 0;
             this.pointX = 0; this.pointY = 0;
             this.bindEvents();
@@ -476,12 +680,15 @@
         bindEvents() {
             document.getElementById('btnZoomIn').addEventListener('click', () => this.adjustZoom(0.1));
             document.getElementById('btnZoomOut').addEventListener('click', () => this.adjustZoom(-0.1));
+            document.getElementById('btnFit').addEventListener('click', () => this.fitToWidth());
             this.btnPan.addEventListener('click', () => this.togglePan());
             
             const startPan = (e) => {
                 if(!this.isPanning) return;
+                if (this.isPinching) return;
                 if(['INPUT','TEXTAREA','BUTTON'].includes(e.target.tagName)) return;
                 if (e.target.id === 'paperSignCanvas' || (e.target.closest && e.target.closest('.sign-cell-canvas'))) return;
+                if (e.touches && e.touches.length > 1) return;
                 
                 e.preventDefault();
                 const cx = e.touches ? e.touches[0].clientX : e.clientX;
@@ -512,25 +719,78 @@
             this.viewport.addEventListener('mousedown', startPan);
             this.viewport.addEventListener('touchstart', startPan, {passive:false});
 
-            window.addEventListener('resize', () => {
-                clearTimeout(this.resizeTimer);
-                this.resizeTimer = setTimeout(() => this.fitToWidth(), 200);
-            });
-            setTimeout(() => this.fitToWidth(), 100);
+              this.viewport.addEventListener('wheel', (e) => {
+                  if (['INPUT','TEXTAREA'].includes(e.target.tagName)) return;
+                  e.preventDefault();
+                  const factor = e.deltaY > 0 ? 0.9 : 1.1;
+                  this.setZoom(this.zoomLevel * factor, e.clientX, e.clientY);
+              }, { passive: false });
+
+            this.viewport.addEventListener('touchstart', (e) => {
+                if (e.touches.length !== 2) return;
+                e.preventDefault();
+                const [t1, t2] = [e.touches[0], e.touches[1]];
+                const dx = t2.clientX - t1.clientX;
+                const dy = t2.clientY - t1.clientY;
+                this.isPinching = true;
+                this.pinchStartDist = Math.hypot(dx, dy);
+                this.pinchStartZoom = this.zoomLevel;
+            }, { passive: false });
+
+            this.viewport.addEventListener('touchmove', (e) => {
+                if (!this.isPinching || e.touches.length !== 2) return;
+                e.preventDefault();
+                const [t1, t2] = [e.touches[0], e.touches[1]];
+                const dx = t2.clientX - t1.clientX;
+                const dy = t2.clientY - t1.clientY;
+                const dist = Math.hypot(dx, dy);
+                const next = this.pinchStartZoom * (dist / Math.max(1, this.pinchStartDist));
+                const cx = (t1.clientX + t2.clientX) / 2;
+                const cy = (t1.clientY + t2.clientY) / 2;
+                this.setZoom(next, cx, cy);
+            }, { passive: false });
+
+            this.viewport.addEventListener('touchend', (e) => {
+                if (e.touches.length < 2) this.isPinching = false;
+            }, { passive: false });
+
+              window.addEventListener('resize', () => {
+                  clearTimeout(this.resizeTimer);
+                  this.resizeTimer = setTimeout(() => this.fitToWidth(), 200);
+              });
+              setTimeout(() => this.fitToWidth(), 100);
+              if (document.fonts && document.fonts.ready) {
+                  document.fonts.ready.then(() => this.fitToWidth());
+              }
+          }
+        setZoom(next, cx, cy) {
+            const clamped = Math.max(this.minZoom, Math.min(this.maxZoom, next));
+            const prev = this.zoomLevel || 1;
+            if (typeof cx === "number" && typeof cy === "number") {
+                const rect = this.viewport.getBoundingClientRect();
+                const dx = cx - rect.left - rect.width / 2;
+                const dy = cy - rect.top - rect.height / 2;
+                const ratio = clamped / prev;
+                this.pointX = this.pointX * ratio + dx * (1 - ratio);
+                this.pointY = this.pointY * ratio + dy * (1 - ratio);
+            }
+            this.zoomLevel = clamped;
+            this.updateTransform();
         }
-        fitToWidth() {
-            const viewportW = this.viewport.clientWidth;
-            const contentW = 854; 
-            let scale = viewportW / contentW;
-            if(scale > 1.1) scale = 1.0; 
-            this.zoomLevel = scale;
-            this.pointX = 0;
+          fitToWidth() {
+              const viewportW = this.viewport.clientWidth;
+              const contentEl = this.paperWrapper.querySelector('.a4-paper');
+              const baseW = contentEl ? contentEl.getBoundingClientRect().width / (this.zoomLevel || 1) : 854;
+              const contentW = Math.max(baseW, 1);
+              let scale = viewportW / contentW;
+              if(scale > 1.1) scale = 1.0; 
+              this.zoomLevel = Math.max(this.minZoom, Math.min(this.maxZoom, scale));
+              this.pointX = 0;
             this.pointY = 0;
             this.updateTransform();
         }
         adjustZoom(delta) {
-            this.zoomLevel = Math.max(0.3, this.zoomLevel + delta);
-            this.updateTransform();
+            this.setZoom(this.zoomLevel + delta);
         }
         togglePan() {
             this.isPanning = !this.isPanning;
@@ -565,8 +825,10 @@
             this.backgroundImages = []; 
             this.pad = null;
             this.isOpen = false;
+            this.onPaperChange = null;
             
-            this.imgState = { x: 0, y: 0, scale: 0.5 };
+            this.imgBase = { w: 0, h: 0 };
+            this.imgState = { x: 0, y: 0, scale: 1 };
             this.isDraggingImg = false;
             this.dragStart = { x: 0, y: 0 };
 
@@ -576,10 +838,10 @@
             this.init();
         }
 
-        init() {
-            this.pad = new SignaturePad(this.modalCanvas, {
-                minWidth: 1.0, maxWidth: 3.0, penColor: '#000', throttle: 8
-            });
+          init() {
+              this.pad = new SignaturePad(this.modalCanvas, {
+                  minWidth: 1.0, maxWidth: 3.0, penColor: '#000', throttle: 8
+              });
 
             this.triggerBtn.addEventListener('click', () => this.openModal());
             document.getElementById('btnCloseModalX').addEventListener('click', () => this.closeModal());
@@ -598,7 +860,8 @@
             document.getElementById('btnEditApply').addEventListener('click', () => this.applyEditorImage());
             
             this.scaleSlider.addEventListener('input', (e) => {
-                this.imgState.scale = parseFloat(e.target.value);
+                const next = parseFloat(e.target.value);
+                this.imgState.scale = Number.isFinite(next) ? next : 1;
                 this.updateImgTransform();
             });
             
@@ -711,17 +974,31 @@
         }
 
         openEditor(src) {
-            this.editImg.src = src;
             this.editLayer.style.display = 'flex';
-            this.imgState = { x: 0, y: 0, scale: 0.5 };
-            this.scaleSlider.value = 0.5;
-            this.updateImgTransform();
+            this.editImg.onload = () => {
+                const rect = this.editContainer.getBoundingClientRect();
+                const iw = this.editImg.naturalWidth || this.editImg.width || rect.width;
+                const ih = this.editImg.naturalHeight || this.editImg.height || rect.height;
+                const fit = Math.min(rect.width / Math.max(1, iw), rect.height / Math.max(1, ih));
+                this.imgBase = { w: Math.max(1, iw * fit), h: Math.max(1, ih * fit) };
+                this.imgState = { x: 0, y: 0, scale: 1 };
+                this.scaleSlider.value = "1";
+                this.updateImgTransform();
+            };
+            this.editImg.src = src;
         }
         
         closeEditor() { this.editLayer.style.display = 'none'; }
 
         updateImgTransform() {
-            this.editImg.style.transform = `translate(-50%, -50%) translate(${this.imgState.x}px, ${this.imgState.y}px) scale(${this.imgState.scale})`;
+            const clamped = Math.max(0.2, Math.min(2.0, this.imgState.scale));
+            this.imgState.scale = clamped;
+            this.scaleSlider.value = String(clamped);
+            if (this.imgBase && this.imgBase.w) {
+                this.editImg.style.width = `${this.imgBase.w}px`;
+                this.editImg.style.height = `${this.imgBase.h}px`;
+            }
+            this.editImg.style.transform = `translate(-50%, -50%) translate(${this.imgState.x}px, ${this.imgState.y}px) scale(${clamped})`;
         }
 
         startDrag(e) {
@@ -754,31 +1031,23 @@
         }
 
         applyEditorImage() {
-            const imgRect = this.editImg.getBoundingClientRect();
             const containerRect = this.editContainer.getBoundingClientRect();
-            
-            const imgCenterX = imgRect.left + imgRect.width / 2;
-            const imgCenterY = imgRect.top + imgRect.height / 2;
-            const contCenterX = containerRect.left + containerRect.width / 2;
-            const contCenterY = containerRect.top + containerRect.height / 2;
-
-            const relX = (imgCenterX - contCenterX) / containerRect.width;
-            const relY = (imgCenterY - contCenterY) / containerRect.height;
-
-            const ratioX = this.modalCanvas.width / containerRect.width;
-            const ratioY = this.modalCanvas.height / containerRect.height;
-
-            const w = imgRect.width * ratioX;
-            const h = imgRect.height * ratioY;
-
-            const canvasCenterX = this.modalCanvas.width / 2;
-            const canvasCenterY = this.modalCanvas.height / 2;
-
-            const drawCenterX = canvasCenterX + relX * this.modalCanvas.width;
-            const drawCenterY = canvasCenterY + relY * this.modalCanvas.height;
-
-            const x = drawCenterX - w / 2;
-            const y = drawCenterY - h / 2;
+            const baseW = (this.imgBase && this.imgBase.w) ? this.imgBase.w : this.editImg.getBoundingClientRect().width;
+            const baseH = (this.imgBase && this.imgBase.h) ? this.imgBase.h : this.editImg.getBoundingClientRect().height;
+            const displayW = baseW * this.imgState.scale;
+            const displayH = baseH * this.imgState.scale;
+            const contCenterX = containerRect.width / 2;
+            const contCenterY = containerRect.height / 2;
+            const imgCenterX = contCenterX + this.imgState.x;
+            const imgCenterY = contCenterY + this.imgState.y;
+            const w = displayW;
+            const h = displayH;
+            let x = imgCenterX - displayW / 2;
+            let y = imgCenterY - displayH / 2;
+            const maxX = Math.max(0, containerRect.width - w);
+            const maxY = Math.max(0, containerRect.height - h);
+            x = Math.min(Math.max(0, x), maxX);
+            y = Math.min(Math.max(0, y), maxY);
             
             const imgObj = new Image();
             imgObj.onload = () => {
@@ -842,31 +1111,68 @@
                 offsetX = (pw - drawW) / 2;
                 offsetY = (ph - drawH) / 2;
 
-                this.paperSignature = { img, w: drawW, h: drawH, x: offsetX, y: offsetY };
-                this.renderPaperSignature();
-                
-                this.guideText.style.display = 'none';
-                this.closeModal();
-                this.ui.showToast("서명이 적용되었습니다");
-            };
-            img.src = dataURL;
-        }
+                  this.paperSignature = { img, w: drawW, h: drawH, x: offsetX, y: offsetY, src: dataURL };
+                  this.renderPaperSignature();
+                  
+                  this.guideText.style.display = 'none';
+                  this.emitPaperChange();
+                  this.closeModal();
+                  this.ui.showToast("서명이 적용되었습니다");
+              };
+              img.src = dataURL;
+          }
         
         clearPaper() {
-            const ctx = this.paperCanvas.getContext('2d');
-            ctx.clearRect(0, 0, this.paperCanvas.width, this.paperCanvas.height);
-            this.guideText.style.display = 'block';
-            this.clearAll(); 
-            this.paperSignature = null;
-        }
+              const ctx = this.paperCanvas.getContext('2d');
+              ctx.clearRect(0, 0, this.paperCanvas.width, this.paperCanvas.height);
+              this.guideText.style.display = 'block';
+              this.clearAll(); 
+              this.paperSignature = null;
+              this.emitPaperChange();
+          }
 
-        renderPaperSignature() {
-            const ctx = this.paperCanvas.getContext('2d');
-            ctx.clearRect(0, 0, this.paperCanvas.width, this.paperCanvas.height);
-            if (!this.paperSignature) return;
-            const s = this.paperSignature;
-            ctx.drawImage(s.img, s.x, s.y, s.w, s.h);
-        }
+          renderPaperSignature() {
+              const ctx = this.paperCanvas.getContext('2d');
+              ctx.clearRect(0, 0, this.paperCanvas.width, this.paperCanvas.height);
+              if (!this.paperSignature) return;
+              const s = this.paperSignature;
+              ctx.drawImage(s.img, s.x, s.y, s.w, s.h);
+          }
+
+          getPaperState() {
+              if (!this.paperSignature || !this.paperSignature.img) return null;
+              return {
+                  src: this.paperSignature.src || this.paperSignature.img.src,
+                  x: this.paperSignature.x,
+                  y: this.paperSignature.y,
+                  w: this.paperSignature.w,
+                  h: this.paperSignature.h
+              };
+          }
+
+          setPaperState(state) {
+              if (!state || !state.src) return;
+              const img = new Image();
+              img.onload = () => {
+                  this.paperSignature = {
+                      img,
+                      x: typeof state.x === "number" ? state.x : 0,
+                      y: typeof state.y === "number" ? state.y : 0,
+                      w: typeof state.w === "number" ? state.w : img.width,
+                      h: typeof state.h === "number" ? state.h : img.height,
+                      src: state.src
+                  };
+                  this.renderPaperSignature();
+                  this.guideText.style.display = 'none';
+              };
+              img.src = state.src;
+          }
+
+          emitPaperChange() {
+              if (typeof this.onPaperChange === "function") {
+                  this.onPaperChange(this.getPaperState());
+              }
+          }
 
         startPaperDrag(e) {
             if (!this.paperSignature) return; 
@@ -897,13 +1203,14 @@
                 this.paperSignature.y = this.paperDrag.baseY + dy;
                 this.renderPaperSignature();
             };
-            const end = () => {
-                this.paperDrag.isDragging = false;
-                document.removeEventListener('mousemove', move);
-                document.removeEventListener('mouseup', end);
-                document.removeEventListener('touchmove', move);
-                document.removeEventListener('touchend', end);
-            };
+              const end = () => {
+                  this.paperDrag.isDragging = false;
+                  document.removeEventListener('mousemove', move);
+                  document.removeEventListener('mouseup', end);
+                  document.removeEventListener('touchmove', move);
+                  document.removeEventListener('touchend', end);
+                  this.emitPaperChange();
+              };
             document.addEventListener('mousemove', move);
             document.addEventListener('mouseup', end);
             document.addEventListener('touchmove', move, { passive: false });
@@ -995,6 +1302,77 @@
             }
         }
 
+        _fixTableForCapture(clonedDoc) {
+            try {
+                const tables = clonedDoc.querySelectorAll('table');
+                tables.forEach((table) => {
+                    table.style.tableLayout = 'fixed';
+                    table.style.width = '100%';
+                    table.style.borderCollapse = 'collapse';
+                });
+                clonedDoc.querySelectorAll('td, th').forEach((node) => {
+                    const el = node;
+                    el.style.verticalAlign = 'middle';
+                    el.style.lineHeight = '1.4';
+                    el.style.paddingTop = '6px';
+                    el.style.paddingBottom = '10px';
+                    el.style.paddingLeft = '4px';
+                    el.style.paddingRight = '4px';
+                    el.style.whiteSpace = 'normal';
+                    el.style.wordBreak = 'break-word';
+                    el.style.overflowWrap = 'anywhere';
+                    el.style.boxSizing = 'border-box';
+                });
+            } catch (e) {
+                console.warn("Table capture fix skipped:", e);
+            }
+        }
+
+          _loadScript(src) {
+              if (typeof src === "string") {
+                  return loadScriptOnce(src);
+              }
+              const localSrc = src && src.local;
+              const cdnSrc = src && src.cdn;
+              if (!localSrc && !cdnSrc) {
+                  return Promise.reject(new Error("Missing script source"));
+              }
+              return loadScriptWithFallback(localSrc || cdnSrc, cdnSrc);
+          }
+
+          async _waitForImages(root) {
+              try {
+                  const imgs = Array.from(root.querySelectorAll('img'));
+                  if (!imgs.length) return;
+                  await Promise.all(imgs.map(img => {
+                      if (img.decode) {
+                          return img.decode().catch(() => {});
+                      }
+                      if (img.complete) return Promise.resolve();
+                      return new Promise((resolve) => {
+                          img.addEventListener('load', () => resolve(), { once: true });
+                          img.addEventListener('error', () => resolve(), { once: true });
+                      });
+                  }));
+              } catch (e) {
+                  console.warn("Image wait skipped:", e);
+              }
+          }
+
+          async ensurePdfLibs() {
+              try {
+                  if (!window.html2canvas) {
+                      await this._loadScript(VENDOR_SCRIPTS.html2canvas);
+                  }
+                  if (!window.jspdf) {
+                      await this._loadScript(VENDOR_SCRIPTS.jspdf);
+                  }
+              } catch (e) {
+                  console.warn("PDF vendor libs load failed:", e);
+                  throw e;
+              }
+          }
+
         async prepareCapture() {
             const originalTransform = this.paperWrapper.style.transform;
             const originalMargin = this.paperWrapper.style.margin;
@@ -1025,30 +1403,70 @@
             };
         }
 
-        async savePDF() {
-            this.ui.showToast("PDF 생성 중...");
-            const restore = await this.prepareCapture();
-            try {
-                const canvas = await html2canvas(this.documentArea, {
-                    scale: 2, useCORS: true, backgroundColor: "#ffffff",
-                    // ✅ [추가] clone DOM에서만 input → div 치환
-                    onclone: (clonedDoc) => this._fixRecipientForCapture(clonedDoc)
-                });
-                
-                const imgData = canvas.toDataURL('image/jpeg', 0.95);
-                const { jsPDF } = window.jspdf;
+          async savePDF() {
+              this.ui.showToast("PDF 생성 중...");
+              try {
+                  await this.ensurePdfLibs();
+              } catch {
+                  this.ui.showToast("PDF 라이브러리 로드 실패");
+                  return;
+              }
+              const html2canvas = window.html2canvas;
+              const jsPDF = window.jspdf && window.jspdf.jsPDF;
+              if (!html2canvas || !jsPDF) {
+                  this.ui.showToast("PDF 라이브러리 로드 실패");
+                  return;
+              }
+              const restore = await this.prepareCapture();
+              try {
+                  if (document.fonts && document.fonts.ready) {
+                      await document.fonts.ready;
+                  }
+                  await this._waitForImages(this.documentArea);
+                  const canvas = await html2canvas(this.documentArea, {
+                      scale: 2, useCORS: true, backgroundColor: "#ffffff",
+                      // ✅ [추가] clone DOM에서만 input → div 치환
+                      onclone: (clonedDoc) => {
+                          if (clonedDoc.body) {
+                              clonedDoc.body.style.fontFamily = "Arial, sans-serif";
+                          }
+                          this._fixRecipientForCapture(clonedDoc);
+                          this._fixTableForCapture(clonedDoc);
+                      }
+                  });
+                  if (!canvas || canvas.width === 0 || canvas.height === 0) {
+                      this.ui.showToast("이미지 생성 실패");
+                      return;
+                  }
+
                 const pdf = new jsPDF('p', 'mm', 'a4');
                 const pW = pdf.internal.pageSize.getWidth();
                 const pH = pdf.internal.pageSize.getHeight();
-                const imgH = canvas.height * pW / canvas.width;
-                
-                if (imgH <= pH) {
-                    const totalMargin = pH - imgH;
-                    const topMargin = totalMargin / 2; 
-                    pdf.addImage(imgData, 'JPEG', 0, topMargin, pW, imgH);
-                } else {
-                    const ratio = pH / imgH;
-                    pdf.addImage(imgData, 'JPEG', 0, 0, pW * ratio, imgH * ratio);
+                const mmPerPx = pW / canvas.width;
+                const pageHeightPx = Math.floor(pH / mmPerPx);
+
+                let y = 0;
+                let page = 0;
+                while (y < canvas.height - 1) {
+                    if (page > 0) pdf.addPage();
+                    const sliceH = Math.min(pageHeightPx, canvas.height - y);
+                    const sliceCanvas = document.createElement('canvas');
+                    sliceCanvas.width = canvas.width;
+                    sliceCanvas.height = sliceH;
+                    const ctx = sliceCanvas.getContext('2d');
+                    if (ctx) {
+                        ctx.drawImage(canvas, 0, y, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+                    }
+                    pdf.addImage(
+                        sliceCanvas.toDataURL('image/jpeg', 0.95),
+                        'JPEG',
+                        0,
+                        0,
+                        pW,
+                        sliceH * mmPerPx
+                    );
+                    y += sliceH;
+                    page += 1;
                 }
                 
                 pdf.save(`작업완료확인서_${this.getDateStr()}.pdf`);
@@ -1061,16 +1479,41 @@
             }
         }
 
-        async shareContent() {
-            if(!navigator.share) { alert("공유 기능을 지원하지 않는 브라우저입니다."); return; }
-            this.ui.showToast("이미지 생성 중...");
-            const restore = await this.prepareCapture();
-            try {
-                const canvas = await html2canvas(this.documentArea, { 
-                    scale: 2, useCORS: true,
-                    // ✅ [추가] 공유 캡처도 동일 적용
-                    onclone: (clonedDoc) => this._fixRecipientForCapture(clonedDoc)
-                });
+          async shareContent() {
+              if(!navigator.share) { alert("공유 기능을 지원하지 않는 브라우저입니다."); return; }
+              this.ui.showToast("이미지 생성 중...");
+              try {
+                  await this.ensurePdfLibs();
+              } catch {
+                  this.ui.showToast("라이브러리 로드 실패");
+                  return;
+              }
+              const html2canvas = window.html2canvas;
+              if (!html2canvas) {
+                  this.ui.showToast("라이브러리 로드 실패");
+                  return;
+              }
+              const restore = await this.prepareCapture();
+              try {
+                  if (document.fonts && document.fonts.ready) {
+                      await document.fonts.ready;
+                  }
+                  await this._waitForImages(this.documentArea);
+                  const canvas = await html2canvas(this.documentArea, { 
+                      scale: 2, useCORS: true,
+                      // ✅ [추가] 공유 캡처도 동일 적용
+                      onclone: (clonedDoc) => {
+                          if (clonedDoc.body) {
+                              clonedDoc.body.style.fontFamily = "Arial, sans-serif";
+                          }
+                          this._fixRecipientForCapture(clonedDoc);
+                          this._fixTableForCapture(clonedDoc);
+                      }
+                  });
+                  if (!canvas || canvas.width === 0 || canvas.height === 0) {
+                      this.ui.showToast("이미지 생성 실패");
+                      return;
+                  }
                 canvas.toBlob(async (blob) => {
                     const file = new File([blob], "confirmation.jpg", { type: "image/jpeg" });
                     await navigator.share({ title: '작업확인서', files: [file] });
@@ -1089,18 +1532,19 @@
     }
 
     /* 메인 앱 초기화 */
-    class App {
-        constructor() {
-            const isIframe = window.self !== window.top;
-            if (isIframe) { document.body.classList.add('iframe-mode'); }
-            
-            this.ui = new UiUtils();
-            this.viewer = new ViewerManager(this.ui);
-            this.signer = new SignatureManager(this.ui, this.viewer);
-            this.exporter = new Exporter(this.ui);
-            
-            document.getElementById('btnBack').addEventListener('click', () => { 
-                if(confirm("종료하시겠습니까?")) {
+      class App {
+          constructor() {
+              const isIframe = window.self !== window.top;
+              if (isIframe) { document.body.classList.add('iframe-mode'); }
+              
+              this.ui = new UiUtils();
+              this.viewer = new ViewerManager(this.ui);
+              this.signer = new SignatureManager(this.ui, this.viewer);
+              this.exporter = new Exporter(this.ui);
+              this.storageKey = "confirm3:draft:v1";
+              
+              document.getElementById('btnBack').addEventListener('click', () => { 
+                  if(confirm("종료하시겠습니까?")) {
                     window.close();
                     // 만약 window.close()가 작동하지 않으면 (opener가 없는 경우)
                     setTimeout(() => {
@@ -1110,49 +1554,131 @@
                     }, 100);
                 }
             });
-            document.getElementById('btnReset').addEventListener('click', () => {
-                if(confirm("모든 입력을 초기화하시겠습니까?")) {
-                    document.querySelectorAll('input, textarea').forEach(el => {
-                        // 날짜와 귀중, 소속 기본값은 유지하고 싶다면 제외 조건 추가 가능하지만
-                        // 요청하신 리셋 기능은 전체 초기화가 일반적이므로 다 비움 (단, 귀중은 '귀중'으로 복원하는게 좋음)
-                        if(el.classList.contains('recipient-suffix')) {
-                             el.value = '귀중';
-                        } else {
-                             el.value = '';
-                        }
-                    });
-                    this.signer.clearPaper();
-                    this.ui.showToast("초기화 완료");
-                }
-            });
-            
-            const d = new Date();
-            document.getElementById('dateField').value = `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일`;
-            
-            if (window.lucide && typeof window.lucide.createIcons === 'function') {
-                window.lucide.createIcons();
-            }
+              document.getElementById('btnReset').addEventListener('click', () => {
+                  if(confirm("모든 입력을 초기화하시겠습니까?")) {
+                      document.querySelectorAll('input, textarea').forEach(el => {
+                          // 날짜와 귀중, 소속 기본값은 유지하고 싶다면 제외 조건 추가 가능하지만
+                          // 요청하신 리셋 기능은 전체 초기화가 일반적이므로 다 비움 (단, 귀중은 '귀중'으로 복원하는게 좋음)
+                          if(el.classList.contains('recipient-suffix')) {
+                               el.value = '귀중';
+                          } else {
+                               el.value = '';
+                          }
+                      });
+                      this.signer.clearPaper();
+                      this.clearDraft();
+                      this.ui.showToast("초기화 완료");
+                  }
+              });
+              
+              const d = new Date();
+              this.restoreDraft();
+              const dateField = document.getElementById('dateField');
+              if (dateField && !dateField.value) {
+                  dateField.value = `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일`;
+              }
+              
+              if (window.lucide && typeof window.lucide.createIcons === 'function') {
+                  window.lucide.createIcons();
+              }
 
-            // [추가] Table Textarea 자동 높이 조절
-            this.initAutoResize();
-        }
+              // [추가] Table Textarea 자동 높이 조절
+              this.initAutoResize();
+              this.bindDraftListeners();
+              this.saveDraft();
+          }
 
-        initAutoResize() {
+          initAutoResize() {
             const textareas = document.querySelectorAll('.table-input');
             const resize = (el) => {
                 el.style.height = 'auto'; 
                 el.style.height = el.scrollHeight + 'px';
             };
-            textareas.forEach(el => {
-                el.addEventListener('input', () => resize(el));
-                // 초기값 있으면 리사이즈
-                if(el.value) resize(el);
-            });
-        }
-    }
+              textareas.forEach(el => {
+                  el.addEventListener('input', () => resize(el));
+                  // 초기값 있으면 리사이즈
+                  if(el.value) resize(el);
+              });
+          }
 
-    document.addEventListener('DOMContentLoaded', () => { new App(); });
+          getDraftFields() {
+              return Array.from(document.querySelectorAll('#documentArea input, #documentArea textarea'));
+          }
+
+          getFieldKey(el, idx) {
+              const existing = el.getAttribute('data-store-key') || el.id || el.name;
+              const key = existing || `${el.tagName.toLowerCase()}:${idx}`;
+              if (!el.getAttribute('data-store-key')) {
+                  el.setAttribute('data-store-key', key);
+              }
+              return key;
+          }
+
+          saveDraft() {
+              try {
+                  const fields = {};
+                  this.getDraftFields().forEach((el, idx) => {
+                      const key = this.getFieldKey(el, idx);
+                      fields[key] = el.value;
+                  });
+                  const signature = this.signer && typeof this.signer.getPaperState === "function"
+                      ? this.signer.getPaperState()
+                      : null;
+                  localStorage.setItem(this.storageKey, JSON.stringify({ fields, signature }));
+              } catch (e) {
+                  console.warn("Draft save skipped:", e);
+              }
+          }
+
+          restoreDraft() {
+              try {
+                  const raw = localStorage.getItem(this.storageKey);
+                  if (!raw) return;
+                  const data = JSON.parse(raw);
+                  const fields = data && data.fields ? data.fields : {};
+                  this.getDraftFields().forEach((el, idx) => {
+                      const key = this.getFieldKey(el, idx);
+                      if (Object.prototype.hasOwnProperty.call(fields, key)) {
+                          el.value = fields[key];
+                      }
+                  });
+                  if (data && data.signature && this.signer && typeof this.signer.setPaperState === "function") {
+                      requestAnimationFrame(() => this.signer.setPaperState(data.signature));
+                  }
+              } catch (e) {
+                  console.warn("Draft restore skipped:", e);
+              }
+          }
+
+          clearDraft() {
+              try {
+                  localStorage.removeItem(this.storageKey);
+              } catch (e) {
+                  console.warn("Draft clear skipped:", e);
+              }
+          }
+
+          bindDraftListeners() {
+              const persist = () => this.saveDraft();
+              this.getDraftFields().forEach((el) => {
+                  el.addEventListener('input', persist);
+                  el.addEventListener('change', persist);
+                  el.addEventListener('blur', persist);
+              });
+              window.addEventListener('beforeunload', persist);
+              if (this.signer) {
+                  this.signer.onPaperChange = persist;
+              }
+          }
+      }
+
+      document.addEventListener('DOMContentLoaded', () => {
+          ensureUiLibs().finally(() => {
+              installLucideFallback();
+              installSignaturePadFallback();
+              new App();
+          });
+      });
 </script>
 </body>
 </html>
-

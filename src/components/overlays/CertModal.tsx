@@ -1,5 +1,6 @@
 ﻿import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, RotateCcw, X } from "lucide-react";
+import { ChevronLeft, Download, RotateCcw, X } from "lucide-react";
+import { toast } from "sonner";
 
 interface CertModalProps {
   isOpen: boolean;
@@ -26,7 +27,7 @@ const patchConfirmDocument = (doc: Document) => {
 
   const viewport = doc.getElementById("viewport") as HTMLElement | null;
   if (viewport) {
-    viewport.style.touchAction = "pinch-zoom";
+    viewport.style.touchAction = "pan-x pan-y";
   }
 
   const controls = doc.querySelector<HTMLElement>(".controls-pill");
@@ -37,34 +38,49 @@ const patchConfirmDocument = (doc: Document) => {
 
 export default function CertModal({ isOpen, onClose }: CertModalProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const keepAliveRef = useRef(false);
   const [mounted, setMounted] = useState(isOpen);
   const [visible, setVisible] = useState(false);
   const [frameReady, setFrameReady] = useState(false);
   const [frameError, setFrameError] = useState(false);
 
   useEffect(() => {
+    if (typeof document === "undefined") return;
+    const link = document.createElement("link");
+    link.rel = "preload";
+    link.as = "document";
+    link.href = CERT_SRC;
+    document.head.appendChild(link);
+    return () => {
+      link.parentNode?.removeChild(link);
+    };
+  }, []);
+
+  useEffect(() => {
     if (isOpen) {
       setMounted(true);
-      setFrameReady(false);
+      setFrameReady(keepAliveRef.current);
       setFrameError(false);
       const raf = window.requestAnimationFrame(() => setVisible(true));
       return () => window.cancelAnimationFrame(raf);
     }
 
     setVisible(false);
-    const timer = window.setTimeout(() => setMounted(false), SHEET_ANIMATION_MS);
-    return () => window.clearTimeout(timer);
+    if (!keepAliveRef.current) {
+      const timer = window.setTimeout(() => setMounted(false), SHEET_ANIMATION_MS);
+      return () => window.clearTimeout(timer);
+    }
   }, [isOpen]);
 
   useEffect(() => {
-    if (!mounted || typeof document === "undefined") return;
+    if (!isOpen || typeof document === "undefined") return;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
     return () => {
       document.body.style.overflow = prevOverflow;
     };
-  }, [mounted]);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -85,6 +101,8 @@ export default function CertModal({ isOpen, onClose }: CertModalProps) {
       if (!doc) return;
 
       patchConfirmDocument(doc);
+      doc.body?.classList.add("iframe-mode");
+      keepAliveRef.current = true;
       setFrameError(false);
       setFrameReady(true);
     } catch {
@@ -94,8 +112,14 @@ export default function CertModal({ isOpen, onClose }: CertModalProps) {
   }, []);
 
   const clickInnerButton = useCallback((buttonId: string) => {
-    const target = iframeRef.current?.contentDocument?.getElementById(buttonId) as HTMLButtonElement | null;
-    target?.click();
+    const doc = iframeRef.current?.contentDocument;
+    const win = iframeRef.current?.contentWindow as any;
+    const target = doc?.getElementById(buttonId) as HTMLButtonElement | null;
+    if (!target) {
+      toast.error("내부 버튼을 찾지 못했습니다.");
+      return;
+    }
+    target.click();
   }, []);
 
   if (!mounted) return null;
@@ -115,8 +139,17 @@ export default function CertModal({ isOpen, onClose }: CertModalProps) {
         }`}
         style={{ paddingTop: "env(safe-area-inset-top)" }}
       >
-        <header className="flex h-[60px] min-h-[60px] items-center justify-between border-b border-white/15 bg-black px-3">
-          <span className="pl-1 text-lg-app font-bold text-white">작업완료확인서</span>
+        <header className="flex h-[60px] min-h-[60px] items-center justify-between border-b border-white/15 bg-black px-2">
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={onClose}
+              className="rounded-full p-2 text-white transition active:bg-white/15"
+              aria-label="이전"
+            >
+              <ChevronLeft className="h-6 w-6" />
+            </button>
+            <span className="text-lg-app font-bold text-white">작업완료확인서</span>
+          </div>
 
           <div className="flex items-center gap-1.5">
             <button
@@ -159,6 +192,7 @@ export default function CertModal({ isOpen, onClose }: CertModalProps) {
             }}
             className="h-full w-full border-0 bg-black"
             allow="fullscreen"
+            loading="eager"
           />
 
           {!frameReady && !frameError && (
