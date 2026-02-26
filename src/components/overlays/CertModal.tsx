@@ -1,5 +1,6 @@
 ﻿import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, RotateCcw, X } from "lucide-react";
+import { ChevronLeft, Download, RotateCcw, X } from "lucide-react";
+import { toast } from "sonner";
 
 interface CertModalProps {
   isOpen: boolean;
@@ -100,6 +101,7 @@ export default function CertModal({ isOpen, onClose }: CertModalProps) {
       if (!doc) return;
 
       patchConfirmDocument(doc);
+      doc.body?.classList.add("iframe-mode");
       keepAliveRef.current = true;
       setFrameError(false);
       setFrameReady(true);
@@ -110,8 +112,14 @@ export default function CertModal({ isOpen, onClose }: CertModalProps) {
   }, []);
 
   const clickInnerButton = useCallback((buttonId: string) => {
-    const target = iframeRef.current?.contentDocument?.getElementById(buttonId) as HTMLButtonElement | null;
-    target?.click();
+    const doc = iframeRef.current?.contentDocument;
+    const win = iframeRef.current?.contentWindow as any;
+    const target = doc?.getElementById(buttonId) as HTMLButtonElement | null;
+    if (!target) {
+      toast.error("내부 버튼을 찾지 못했습니다.");
+      return;
+    }
+    target.click();
   }, []);
 
   if (!mounted) return null;
@@ -131,8 +139,17 @@ export default function CertModal({ isOpen, onClose }: CertModalProps) {
         }`}
         style={{ paddingTop: "env(safe-area-inset-top)" }}
       >
-        <header className="flex h-[60px] min-h-[60px] items-center justify-between border-b border-white/15 bg-black px-3">
-          <span className="pl-1 text-lg-app font-bold text-white">작업완료확인서</span>
+        <header className="flex h-[60px] min-h-[60px] items-center justify-between border-b border-white/15 bg-black px-2">
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={onClose}
+              className="rounded-full p-2 text-white transition active:bg-white/15"
+              aria-label="이전"
+            >
+              <ChevronLeft className="h-6 w-6" />
+            </button>
+            <span className="text-lg-app font-bold text-white">작업완료확인서</span>
+          </div>
 
           <div className="flex items-center gap-1.5">
             <button
@@ -176,7 +193,6 @@ export default function CertModal({ isOpen, onClose }: CertModalProps) {
             className="h-full w-full border-0 bg-black"
             allow="fullscreen"
             loading="eager"
-            fetchPriority="high"
           />
 
           {!frameReady && !frameError && (

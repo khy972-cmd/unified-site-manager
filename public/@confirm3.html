@@ -24,6 +24,8 @@
         --header-navy: #1a254f;
         --primary: #31a3fa;
         --primary-bg: #eaf6ff;
+        --info-col-label: 12%;
+        --info-col-label-2: 10%;
     }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     
@@ -57,6 +59,10 @@
         padding: 8px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
     }
     .icon-btn:hover { background: rgba(255,255,255,0.15); }
+    .icon-btn svg, .ctrl-btn svg, .mini-btn svg, .uu-btn svg, .toast svg {
+        width: 20px; height: 20px; flex-shrink: 0;
+    }
+    svg { vector-effect: non-scaling-stroke; }
 
     /* =========================================
        MODULE: VIEWER (Layout Fixed)
@@ -96,6 +102,9 @@
     .info-table { width: 100%; border-collapse: collapse; border: 2px solid var(--border-color); margin-bottom: 20px; table-layout: fixed; }
     .info-table th, .info-table td { border: 1px solid var(--border-color); padding: 8px; vertical-align: middle; }
     .info-table th { background: #f8fafc; font-weight: 800; text-align: center; font-size: 16px; color: #334155; word-break: keep-all; }
+    .info-table col.info-col-label { width: var(--info-col-label); }
+    .info-table col.info-col-label-2 { width: var(--info-col-label-2); }
+    .info-table col.info-col-value { width: auto; }
 
     /* Table 내부 입력창 스타일 (Textarea) */
     .table-input {
@@ -280,7 +289,7 @@
     }
     #modalEditingImage {
         position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-        cursor: grab; touch-action: none; max-width: none;
+        cursor: grab; touch-action: none; max-width: 100%; max-height: 100%; object-fit: contain;
     }
     .modal-edit-controls {
         position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -333,10 +342,10 @@
 
         <table class="info-table">
             <colgroup>
-                <col style="width: 12%;">
-                <col style="width: 48%;">
-                <col style="width: 10%;">
-                <col style="width: 30%;">
+                <col class="info-col-label">
+                <col class="info-col-value">
+                <col class="info-col-label info-col-label-2">
+                <col class="info-col-value">
             </colgroup>
             
             <tr>
@@ -420,7 +429,7 @@
                   </div>
                   <div class="modal-edit-controls">
                       <span style="color:#fff; font-size:12px; white-space:nowrap;">크기</span>
-                      <input type="range" id="modalScaleSlider" min="0.1" max="2.0" step="0.05" value="0.5" style="flex:1;">
+                      <input type="range" id="modalScaleSlider" min="0.2" max="2.0" step="0.05" value="1" style="flex:1;">
                       <button class="mini-btn" id="btnEditCancel">취소</button>
                       <button class="mini-btn active" id="btnEditApply">적용</button>
                   </div>
@@ -445,10 +454,22 @@
 
   <script>
       const VENDOR_SCRIPTS = {
-          lucide: "./vendor/lucide.min.js",
-          signaturePad: "./vendor/signature_pad.umd.min.js",
-          html2canvas: "./vendor/html2canvas.min.js",
-          jspdf: "./vendor/jspdf.umd.min.js"
+          lucide: {
+              local: "./vendor/lucide.min.js",
+              cdn: "https://unpkg.com/lucide@latest/dist/umd/lucide.js"
+          },
+          signaturePad: {
+              local: "./vendor/signature_pad.umd.min.js",
+              cdn: "https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"
+          },
+          html2canvas: {
+              local: "./vendor/html2canvas.min.js",
+              cdn: "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"
+          },
+          jspdf: {
+              local: "./vendor/jspdf.umd.min.js",
+              cdn: "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
+          }
       };
 
       const loadScriptOnce = (src) => new Promise((resolve, reject) => {
@@ -466,10 +487,19 @@
           document.head.appendChild(script);
       });
 
+      const loadScriptWithFallback = async (localSrc, cdnSrc) => {
+          try {
+              await loadScriptOnce(localSrc);
+          } catch (e) {
+              if (!cdnSrc) throw e;
+              await loadScriptOnce(cdnSrc);
+          }
+      };
+
       const ensureUiLibs = async () => {
           const tasks = [];
-          if (!window.lucide) tasks.push(loadScriptOnce(VENDOR_SCRIPTS.lucide));
-          if (!window.SignaturePad) tasks.push(loadScriptOnce(VENDOR_SCRIPTS.signaturePad));
+          if (!window.lucide) tasks.push(loadScriptWithFallback(VENDOR_SCRIPTS.lucide.local, VENDOR_SCRIPTS.lucide.cdn));
+          if (!window.SignaturePad) tasks.push(loadScriptWithFallback(VENDOR_SCRIPTS.signaturePad.local, VENDOR_SCRIPTS.signaturePad.cdn));
           if (!tasks.length) return;
           try {
               await Promise.all(tasks);
@@ -792,12 +822,13 @@
             this.editContainer = document.getElementById('modalEditContainer');
             this.scaleSlider = document.getElementById('modalScaleSlider');
             
-              this.backgroundImages = []; 
-              this.pad = null;
-              this.isOpen = false;
-              this.onPaperChange = null;
+            this.backgroundImages = []; 
+            this.pad = null;
+            this.isOpen = false;
+            this.onPaperChange = null;
             
-            this.imgState = { x: 0, y: 0, scale: 0.5 };
+            this.imgBase = { w: 0, h: 0 };
+            this.imgState = { x: 0, y: 0, scale: 1 };
             this.isDraggingImg = false;
             this.dragStart = { x: 0, y: 0 };
 
@@ -829,7 +860,8 @@
             document.getElementById('btnEditApply').addEventListener('click', () => this.applyEditorImage());
             
             this.scaleSlider.addEventListener('input', (e) => {
-                this.imgState.scale = parseFloat(e.target.value);
+                const next = parseFloat(e.target.value);
+                this.imgState.scale = Number.isFinite(next) ? next : 1;
                 this.updateImgTransform();
             });
             
@@ -942,17 +974,31 @@
         }
 
         openEditor(src) {
-            this.editImg.src = src;
             this.editLayer.style.display = 'flex';
-            this.imgState = { x: 0, y: 0, scale: 0.5 };
-            this.scaleSlider.value = 0.5;
-            this.updateImgTransform();
+            this.editImg.onload = () => {
+                const rect = this.editContainer.getBoundingClientRect();
+                const iw = this.editImg.naturalWidth || this.editImg.width || rect.width;
+                const ih = this.editImg.naturalHeight || this.editImg.height || rect.height;
+                const fit = Math.min(rect.width / Math.max(1, iw), rect.height / Math.max(1, ih));
+                this.imgBase = { w: Math.max(1, iw * fit), h: Math.max(1, ih * fit) };
+                this.imgState = { x: 0, y: 0, scale: 1 };
+                this.scaleSlider.value = "1";
+                this.updateImgTransform();
+            };
+            this.editImg.src = src;
         }
         
         closeEditor() { this.editLayer.style.display = 'none'; }
 
         updateImgTransform() {
-            this.editImg.style.transform = `translate(-50%, -50%) translate(${this.imgState.x}px, ${this.imgState.y}px) scale(${this.imgState.scale})`;
+            const clamped = Math.max(0.2, Math.min(2.0, this.imgState.scale));
+            this.imgState.scale = clamped;
+            this.scaleSlider.value = String(clamped);
+            if (this.imgBase && this.imgBase.w) {
+                this.editImg.style.width = `${this.imgBase.w}px`;
+                this.editImg.style.height = `${this.imgBase.h}px`;
+            }
+            this.editImg.style.transform = `translate(-50%, -50%) translate(${this.imgState.x}px, ${this.imgState.y}px) scale(${clamped})`;
         }
 
         startDrag(e) {
@@ -985,31 +1031,23 @@
         }
 
         applyEditorImage() {
-            const imgRect = this.editImg.getBoundingClientRect();
             const containerRect = this.editContainer.getBoundingClientRect();
-            
-            const imgCenterX = imgRect.left + imgRect.width / 2;
-            const imgCenterY = imgRect.top + imgRect.height / 2;
-            const contCenterX = containerRect.left + containerRect.width / 2;
-            const contCenterY = containerRect.top + containerRect.height / 2;
-
-            const relX = (imgCenterX - contCenterX) / containerRect.width;
-            const relY = (imgCenterY - contCenterY) / containerRect.height;
-
-            const ratioX = this.modalCanvas.width / containerRect.width;
-            const ratioY = this.modalCanvas.height / containerRect.height;
-
-            const w = imgRect.width * ratioX;
-            const h = imgRect.height * ratioY;
-
-            const canvasCenterX = this.modalCanvas.width / 2;
-            const canvasCenterY = this.modalCanvas.height / 2;
-
-            const drawCenterX = canvasCenterX + relX * this.modalCanvas.width;
-            const drawCenterY = canvasCenterY + relY * this.modalCanvas.height;
-
-            const x = drawCenterX - w / 2;
-            const y = drawCenterY - h / 2;
+            const baseW = (this.imgBase && this.imgBase.w) ? this.imgBase.w : this.editImg.getBoundingClientRect().width;
+            const baseH = (this.imgBase && this.imgBase.h) ? this.imgBase.h : this.editImg.getBoundingClientRect().height;
+            const displayW = baseW * this.imgState.scale;
+            const displayH = baseH * this.imgState.scale;
+            const contCenterX = containerRect.width / 2;
+            const contCenterY = containerRect.height / 2;
+            const imgCenterX = contCenterX + this.imgState.x;
+            const imgCenterY = contCenterY + this.imgState.y;
+            const w = displayW;
+            const h = displayH;
+            let x = imgCenterX - displayW / 2;
+            let y = imgCenterY - displayH / 2;
+            const maxX = Math.max(0, containerRect.width - w);
+            const maxY = Math.max(0, containerRect.height - h);
+            x = Math.min(Math.max(0, x), maxX);
+            y = Math.min(Math.max(0, y), maxY);
             
             const imgObj = new Image();
             imgObj.onload = () => {
@@ -1291,30 +1329,31 @@
         }
 
           _loadScript(src) {
-              return new Promise((resolve, reject) => {
-                const existing = document.querySelector(`script[src="${src}"]`);
-                if (existing) {
-                    existing.addEventListener('load', () => resolve(), { once: true });
-                    existing.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)), { once: true });
-                    return;
-                }
-                const script = document.createElement('script');
-                script.src = src;
-                script.async = true;
-                script.onload = () => resolve();
-                script.onerror = () => reject(new Error(`Failed to load ${src}`));
-                document.head.appendChild(script);
-              });
+              if (typeof src === "string") {
+                  return loadScriptOnce(src);
+              }
+              const localSrc = src && src.local;
+              const cdnSrc = src && src.cdn;
+              if (!localSrc && !cdnSrc) {
+                  return Promise.reject(new Error("Missing script source"));
+              }
+              return loadScriptWithFallback(localSrc || cdnSrc, cdnSrc);
           }
 
           async _waitForImages(root) {
               try {
-                  const imgs = Array.from(root.querySelectorAll('img')).filter(img => !img.complete);
+                  const imgs = Array.from(root.querySelectorAll('img'));
                   if (!imgs.length) return;
-                  await Promise.all(imgs.map(img => new Promise((resolve) => {
-                      img.addEventListener('load', () => resolve(), { once: true });
-                      img.addEventListener('error', () => resolve(), { once: true });
-                  })));
+                  await Promise.all(imgs.map(img => {
+                      if (img.decode) {
+                          return img.decode().catch(() => {});
+                      }
+                      if (img.complete) return Promise.resolve();
+                      return new Promise((resolve) => {
+                          img.addEventListener('load', () => resolve(), { once: true });
+                          img.addEventListener('error', () => resolve(), { once: true });
+                      });
+                  }));
               } catch (e) {
                   console.warn("Image wait skipped:", e);
               }
@@ -1380,6 +1419,9 @@
               }
               const restore = await this.prepareCapture();
               try {
+                  if (document.fonts && document.fonts.ready) {
+                      await document.fonts.ready;
+                  }
                   await this._waitForImages(this.documentArea);
                   const canvas = await html2canvas(this.documentArea, {
                       scale: 2, useCORS: true, backgroundColor: "#ffffff",
@@ -1392,6 +1434,10 @@
                           this._fixTableForCapture(clonedDoc);
                       }
                   });
+                  if (!canvas || canvas.width === 0 || canvas.height === 0) {
+                      this.ui.showToast("이미지 생성 실패");
+                      return;
+                  }
 
                 const pdf = new jsPDF('p', 'mm', 'a4');
                 const pW = pdf.internal.pageSize.getWidth();
@@ -1449,6 +1495,9 @@
               }
               const restore = await this.prepareCapture();
               try {
+                  if (document.fonts && document.fonts.ready) {
+                      await document.fonts.ready;
+                  }
                   await this._waitForImages(this.documentArea);
                   const canvas = await html2canvas(this.documentArea, { 
                       scale: 2, useCORS: true,
@@ -1461,6 +1510,10 @@
                           this._fixTableForCapture(clonedDoc);
                       }
                   });
+                  if (!canvas || canvas.width === 0 || canvas.height === 0) {
+                      this.ui.showToast("이미지 생성 실패");
+                      return;
+                  }
                 canvas.toBlob(async (blob) => {
                     const file = new File([blob], "confirmation.jpg", { type: "image/jpeg" });
                     await navigator.share({ title: '작업확인서', files: [file] });
