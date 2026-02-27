@@ -1,12 +1,14 @@
 ﻿import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useUserRole } from "@/hooks/useUserRole";
 import {
-  Search, Plus, X, FileText, MapPin, Trash2, ArrowLeft, Check, Upload, FileUp, Calendar, User, Building, Wrench, Eye, Edit3, ChevronDown, ChevronUp, Download, Share2, Camera, RefreshCw, Lock, MapPinIcon, Info
+  Search, Plus, X, FileText, MapPin, Trash2, ArrowLeft, Check, Upload, FileUp, Calendar, User, Building, Wrench, Eye, Edit3, ChevronDown, ChevronUp, Download, Share2, Camera, Lock, MapPinIcon, Info
 } from "lucide-react";
 import { Drawer } from "vaul";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { PreviewAppBar, PreviewControlBar } from "@/components/viewer/PreviewBars";
+import PreviewModal from "@/components/preview/PreviewModal";
+import FilePreviewModal, { type FilePreviewFile } from "@/components/viewer/FilePreviewModal";
+import { usePreviewZoomPan } from "@/hooks/usePreviewZoomPan";
 // PATCH START: shared site list + repo facade (no direct localStorage in UI)
 import { useSiteList } from "@/hooks/useSiteList";
 import { searchSites, type SiteListItem } from "@/lib/siteList";
@@ -119,6 +121,9 @@ type DocFile = {
   url: string;
   size: string;
   ext: string;
+  mime?: string;
+  previewUrl?: string;
+  docType?: string;
   version?: string;
   drawingState?: string;
   url_before?: string;
@@ -189,6 +194,18 @@ const MOCK_DOCS: Record<string, Doc[]> = {
   "조치": [],
 };
 
+const REQUIRED_DOCS = [
+  { key: "safetyEdu", label: "기초안전보건교육이수증", acceptMime: "application/pdf,image/*", help: "미제출 시 업로드 필요" },
+  { key: "bankbook", label: "통장사본", acceptMime: "application/pdf,image/*", help: "미제출 시 업로드 필요" },
+  { key: "idCard", label: "신분증", acceptMime: "application/pdf,image/*", help: "미제출 시 업로드 필요" },
+  { key: "medical", label: "배치전검진서", acceptMime: "application/pdf,image/*", help: "미제출 시 업로드 필요" },
+  { key: "carReg", label: "차량등록증", acceptMime: "application/pdf,image/*", help: "미제출 시 업로드 필요" },
+  { key: "carIns", label: "차량보험증", acceptMime: "application/pdf,image/*", help: "미제출 시 업로드 필요" },
+  { key: "senior", label: "고령자서류", acceptMime: "application/pdf,image/*", help: "미제출 시 업로드 필요" },
+] as const;
+
+type RequiredDocKey = typeof REQUIRED_DOCS[number]["key"];
+
 const formatDateShort = (d: string) => {
   const parts = d.split('-');
   return parts.length === 3 ? `${parts[0].slice(2)}.${parts[1]}.${parts[2]}` : d;
@@ -228,253 +245,6 @@ function matchKo(option: string, query: string): boolean {
   return option.toLowerCase().includes(q.toLowerCase());
 }
 
-type ZoomPanPoint = { x: number; y: number };
-type UseZoomPanOptions = {
-  minScale?: number;
-  maxScale?: number;
-  initialScale?: number;
-  autoFit?: boolean;
-};
-
-function useZoomPan<T extends HTMLElement>(options: UseZoomPanOptions = {}) {
-  const { minScale = 0.5, maxScale = 4, initialScale = 1, autoFit = true } = options;
-  const containerRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<T | null>(null);
-  const [scale, setScale] = useState(initialScale);
-  const [fitScale, setFitScale] = useState(1);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const scaleRef = useRef(scale);
-  const positionRef = useRef(position);
-
-  useEffect(() => {
-    scaleRef.current = scale;
-  }, [scale]);
-
-  useEffect(() => {
-    positionRef.current = position;
-  }, [position]);
-
-  const getSizes = useCallback(() => {
-    const container = containerRef.current;
-    const content = contentRef.current;
-    if (!container || !content) return null;
-    const cw = container.clientWidth || 1;
-    const ch = container.clientHeight || 1;
-    const ew = (content as HTMLElement).offsetWidth || 1;
-    const eh = (content as HTMLElement).offsetHeight || 1;
-    return { cw, ch, ew, eh };
-  }, []);
-
-  const clampPosition = useCallback((pos: ZoomPanPoint, s: number) => {
-    const sizes = getSizes();
-    if (!sizes) return pos;
-    const maxX = Math.max(0, (sizes.ew * s - sizes.cw) / 2);
-    const maxY = Math.max(0, (sizes.eh * s - sizes.ch) / 2);
-    return {
-      x: Math.min(maxX, Math.max(-maxX, pos.x)),
-      y: Math.min(maxY, Math.max(-maxY, pos.y)),
-    };
-  }, [getSizes]);
-
-  const applyScale = useCallback((nextScale: number, center?: ZoomPanPoint) => {
-    const container = containerRef.current;
-    const prevScale = scaleRef.current || 1;
-    const prevPos = positionRef.current;
-    const min = Math.max(minScale, fitScale || minScale);
-    const clamped = Math.max(min, Math.min(maxScale, nextScale));
-    if (!container || !Number.isFinite(clamped)) {
-      setScale(clamped);
-      return;
-    }
-    const rect = container.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    const px = center ? center.x - cx : 0;
-    const py = center ? center.y - cy : 0;
-    const ratio = clamped / prevScale;
-    const nextPos = clampPosition(
-      {
-        x: prevPos.x * ratio + px * (1 - ratio),
-        y: prevPos.y * ratio + py * (1 - ratio),
-      },
-      clamped
-    );
-    setScale(clamped);
-    setPosition(nextPos);
-  }, [clampPosition, fitScale, maxScale, minScale]);
-
-  const reset = useCallback((nextScale?: number) => {
-    const target = nextScale ?? fitScale;
-    const min = Math.max(minScale, fitScale || minScale);
-    const clamped = Math.max(min, Math.min(maxScale, target));
-    setScale(clamped);
-    setPosition({ x: 0, y: 0 });
-  }, [fitScale, maxScale, minScale]);
-
-  const recalcFit = useCallback(() => {
-    const sizes = getSizes();
-    if (!sizes) return;
-    const fit = Math.min(sizes.cw / sizes.ew, sizes.ch / sizes.eh);
-    if (!Number.isFinite(fit) || fit <= 0) return;
-    setFitScale(fit);
-    if (autoFit) {
-      setScale(fit);
-      setPosition({ x: 0, y: 0 });
-      return;
-    }
-    const min = Math.max(minScale, fit);
-    setScale(prev => Math.max(min, Math.min(maxScale, prev)));
-    setPosition(prev => clampPosition(prev, scaleRef.current));
-  }, [autoFit, clampPosition, getSizes, maxScale, minScale]);
-
-  useEffect(() => {
-    recalcFit();
-    const ro = new ResizeObserver(() => recalcFit());
-    if (containerRef.current) ro.observe(containerRef.current);
-    if (contentRef.current) ro.observe(contentRef.current);
-    return () => ro.disconnect();
-  }, [recalcFit]);
-
-  const canPan = scale > fitScale + 0.01;
-
-  const shouldIgnoreTarget = useCallback((target: EventTarget | null) => {
-    const el = target as HTMLElement | null;
-    if (!el) return false;
-    if (el.closest("[data-no-pan='1']")) return true;
-    if (el.isContentEditable || el.closest("[contenteditable='true']")) return true;
-    const tag = el.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON") return true;
-    return false;
-  }, []);
-
-  const dragState = useRef({ active: false, start: { x: 0, y: 0 }, startPos: { x: 0, y: 0 } });
-  const pinchState = useRef({
-    active: false,
-    initialDistance: 0,
-    initialScale: 1,
-    center: { x: 0, y: 0 },
-  });
-  const lastTapRef = useRef(0);
-
-  const onMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button !== 0) return;
-    if (shouldIgnoreTarget(e.target)) return;
-    if (!canPan) return;
-    dragState.current = { active: true, start: { x: e.clientX, y: e.clientY }, startPos: positionRef.current };
-    setIsDragging(true);
-  }, [canPan, shouldIgnoreTarget]);
-
-  const onMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!dragState.current.active) return;
-    const dx = e.clientX - dragState.current.start.x;
-    const dy = e.clientY - dragState.current.start.y;
-    const nextPos = clampPosition(
-      { x: dragState.current.startPos.x + dx, y: dragState.current.startPos.y + dy },
-      scaleRef.current
-    );
-    setPosition(nextPos);
-  }, [clampPosition]);
-
-  const endDrag = useCallback(() => {
-    dragState.current.active = false;
-    setIsDragging(false);
-  }, []);
-
-  const onTouchStart = useCallback((e: React.TouchEvent) => {
-    if (shouldIgnoreTarget(e.target)) return;
-    if (e.touches.length === 2) {
-      e.preventDefault();
-      const [t1, t2] = [e.touches[0], e.touches[1]];
-      const dx = t2.clientX - t1.clientX;
-      const dy = t2.clientY - t1.clientY;
-      pinchState.current = {
-        active: true,
-        initialDistance: Math.hypot(dx, dy),
-        initialScale: scaleRef.current,
-        center: { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 },
-      };
-      return;
-    }
-    if (e.touches.length === 1 && canPan) {
-      const t = e.touches[0];
-      dragState.current = { active: true, start: { x: t.clientX, y: t.clientY }, startPos: positionRef.current };
-      setIsDragging(true);
-    }
-  }, [canPan, shouldIgnoreTarget]);
-
-  const onTouchMove = useCallback((e: React.TouchEvent) => {
-    if (pinchState.current.active && e.touches.length === 2) {
-      e.preventDefault();
-      const [t1, t2] = [e.touches[0], e.touches[1]];
-      const dx = t2.clientX - t1.clientX;
-      const dy = t2.clientY - t1.clientY;
-      const dist = Math.hypot(dx, dy);
-      const nextScale = pinchState.current.initialScale * (dist / Math.max(1, pinchState.current.initialDistance));
-      const center = { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
-      applyScale(nextScale, center);
-      return;
-    }
-    if (dragState.current.active && e.touches.length === 1) {
-      e.preventDefault();
-      const t = e.touches[0];
-      const dx = t.clientX - dragState.current.start.x;
-      const dy = t.clientY - dragState.current.start.y;
-      const nextPos = clampPosition(
-        { x: dragState.current.startPos.x + dx, y: dragState.current.startPos.y + dy },
-        scaleRef.current
-      );
-      setPosition(nextPos);
-    }
-  }, [applyScale, clampPosition]);
-
-  const onTouchEnd = useCallback((e: React.TouchEvent) => {
-    if (e.touches.length !== 0) return;
-    pinchState.current.active = false;
-    dragState.current.active = false;
-    setIsDragging(false);
-    const now = Date.now();
-    if (now - lastTapRef.current < 250) {
-      const target = scaleRef.current > fitScale * 1.05 ? fitScale : Math.min(maxScale, fitScale * 2);
-      reset(target);
-    }
-    lastTapRef.current = now;
-  }, [fitScale, maxScale, reset]);
-
-  const onWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    applyScale(scaleRef.current * delta, { x: e.clientX, y: e.clientY });
-  }, [applyScale]);
-
-  const onDoubleClick = useCallback(() => {
-    const target = scaleRef.current > fitScale * 1.05 ? fitScale : Math.min(maxScale, fitScale * 2);
-    reset(target);
-  }, [fitScale, maxScale, reset]);
-
-  return {
-    containerRef,
-    contentRef,
-    scale,
-    fitScale,
-    position,
-    isDragging,
-    canPan,
-    setScale: applyScale,
-    reset,
-    recalcFit,
-    onWheel,
-    onMouseDown,
-    onMouseMove,
-    onMouseUp: endDrag,
-    onMouseLeave: endDrag,
-    onTouchStart,
-    onTouchMove,
-    onTouchEnd,
-    onDoubleClick,
-  };
-}
-
 export default function DocPage() {
   const { isPartner } = useUserRole();
   // Partners see the same doc page but with restricted tabs (no company-docs tab)
@@ -492,9 +262,14 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
   const [showSiteDropdown, setShowSiteDropdown] = useState(false);
   const [uploadSheetOpen, setUploadSheetOpen] = useState(false);
   const [batchBusy, setBatchBusy] = useState(false);
-  const [previewModal, setPreviewModal] = useState<{ isOpen: boolean; file?: DocFile; title?: string }>({ isOpen: false });
+  const [previewModal, setPreviewModal] = useState<{ isOpen: boolean; file?: FilePreviewFile; title?: string }>({ isOpen: false });
+  const [requiredDocOverrides, setRequiredDocOverrides] = useState<Partial<Record<RequiredDocKey, DocFile>>>({});
+  const [requiredDocHiddenKeys, setRequiredDocHiddenKeys] = useState<Set<RequiredDocKey>>(new Set());
+  const [requiredDocPulseKey, setRequiredDocPulseKey] = useState<RequiredDocKey | null>(null);
+  const [pendingRequiredDocKey, setPendingRequiredDocKey] = useState<RequiredDocKey | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const requiredDocInputRef = useRef<HTMLInputElement>(null);
 
   // PATCH START: upload sheet site selection (autocomplete + strict selection)
   const today = useMemo(() => new Date().toISOString().split("T")[0], []);
@@ -504,9 +279,14 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
   const [uploadSiteDropdownOpen, setUploadSiteDropdownOpen] = useState(false);
   const [uploadDate, setUploadDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [uploadSiteError, setUploadSiteError] = useState<string | null>(null);
+  const [uploadDocName, setUploadDocName] = useState("");
 
   const filteredUploadSites = useMemo(() => searchSites(siteList, uploadSiteQuery, 2).slice(0, 40), [siteList, uploadSiteQuery]);
-  const canSubmitUpload = useMemo(() => selectedFiles.length > 0 && !!uploadSelectedSite && !!uploadDate, [selectedFiles.length, uploadSelectedSite, uploadDate]);
+  const uploadIsMyDocs = DOC_TABS_FILTERED[activeTab] === "내문서함";
+  const canSubmitUpload = useMemo(() => {
+    if (uploadIsMyDocs) return selectedFiles.length > 0 && uploadDocName.trim().length > 0 && !!uploadDate;
+    return selectedFiles.length > 0 && !!uploadSelectedSite && !!uploadDate;
+  }, [selectedFiles.length, uploadDocName, uploadDate, uploadIsMyDocs, uploadSelectedSite]);
   // PATCH END
 
   // Blueprint-specific state
@@ -549,12 +329,12 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
   const reportTableBodyRef = useRef<HTMLTableSectionElement | null>(null);
   const reportPhotoInputRef = useRef<HTMLInputElement>(null);
   const [reportPhotoTarget, setReportPhotoTarget] = useState<{ itemId: string; field: "beforePhoto" | "afterPhoto" } | null>(null);
-  const reportZoom = useZoomPan<HTMLDivElement>({ minScale: 0.5, maxScale: 4, autoFit: true });
+  const reportZoom = usePreviewZoomPan({ open: reportEditorOpen, defaultMinScale: 0.5, defaultMaxScale: 4 });
   const [reportEditorRenderKey, setReportEditorRenderKey] = useState(0);
   const [reportPanMode, setReportPanMode] = useState(false);
   const [reportFitMode, setReportFitMode] = useState<"page" | "width">("width");
-  const REPORT_HEADER_PX = 60;
-  const REPORT_CONTROLBAR_PX = 86;
+  const REPORT_HEADER_PX = 56;
+  const REPORT_TOOLBAR_PX = 76;
   // PATCH END
 
   // Supabase-backed punch data
@@ -1053,6 +833,20 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     reportZoom.onWheel(e);
   }, [reportZoom]);
 
+  const onReportTouchStart = useCallback((e: React.TouchEvent) => {
+    if (!reportPanMode && e.touches.length === 1) return;
+    reportZoom.onTouchStart(e);
+  }, [reportPanMode, reportZoom]);
+
+  const onReportTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!reportPanMode && e.touches.length === 1) return;
+    reportZoom.onTouchMove(e);
+  }, [reportPanMode, reportZoom]);
+
+  const onReportTouchEnd = useCallback((e: React.TouchEvent) => {
+    reportZoom.onTouchEnd(e);
+  }, [reportZoom]);
+
   const loadScript = useCallback((src: string) => {
     return new Promise<void>((resolve, reject) => {
       const existing = document.querySelector(`script[src="${src}"]`) as HTMLScriptElement | null;
@@ -1382,6 +1176,31 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     if (isPunch && !detailGroupId) {
       const updated = punchGroups.filter(g => !selectedIds.has(g.id));
       savePunchGroupsMutation.mutate(updated);
+      setSelectedIds(new Set());
+      toast.success("삭제 완료");
+      return;
+    }
+    if (isMyDocs && !detailGroupId) {
+      const selectedKeys = REQUIRED_DOCS
+        .filter((item) => selectedIds.has(`required-${item.key}`))
+        .map((item) => item.key);
+      if (selectedKeys.length > 0) {
+        setRequiredDocHiddenKeys((prev) => {
+          const next = new Set(prev);
+          selectedKeys.forEach((key) => next.add(key));
+          return next;
+        });
+        setRequiredDocOverrides((prev) => {
+          const next = { ...prev };
+          selectedKeys.forEach((key) => {
+            delete next[key];
+          });
+          return next;
+        });
+      }
+      setSelectedIds(new Set());
+      toast.success("삭제 완료");
+      return;
     }
     setSelectedIds(new Set());
     toast.success("삭제 완료");
@@ -1400,6 +1219,134 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     const chosen = view === 'after' ? file.url_after : view === 'before' ? file.url_before : undefined;
     return (chosen || file.url_after || file.url_before || file.url || '').trim();
   };
+
+  const toPreviewFile = (doc: Doc, file: DocFile): FilePreviewFile => ({
+    id: file.id || `${doc.id}-file`,
+    name: file.name || doc.title || "file",
+    url: resolveFileUrl(file),
+    mime: file.mime,
+    ext: file.ext,
+    size: file.size,
+    createdAt: `${doc.date || ""} ${doc.time || ""}`.trim(),
+    previewUrl: file.previewUrl,
+  });
+
+  const openDocPreview = (doc: Doc, file?: DocFile) => {
+    if (!file) {
+      toast.error("미리볼 파일이 없습니다.");
+      return;
+    }
+
+    const preview = toPreviewFile(doc, file);
+    if (!preview.url) {
+      toast.error("파일 주소를 찾지 못했습니다.");
+      return;
+    }
+
+    setPreviewModal({
+      isOpen: true,
+      file: preview,
+      title: doc.title || preview.name,
+    });
+  };
+
+  const inferRequiredDocType = useCallback((file?: DocFile, doc?: Doc): RequiredDocKey | undefined => {
+    const raw = `${file?.docType || ""} ${file?.name || ""} ${doc?.title || ""}`.toLowerCase();
+    if (!raw) return undefined;
+    if (raw.includes("안전") || raw.includes("교육")) return "safetyEdu";
+    if (raw.includes("통장")) return "bankbook";
+    if (raw.includes("신분증") || raw.includes("주민등록증") || raw.includes("면허증")) return "idCard";
+    if (raw.includes("검진")) return "medical";
+    if (raw.includes("등록증")) return "carReg";
+    if (raw.includes("보험")) return "carIns";
+    if (raw.includes("고령")) return "senior";
+    return undefined;
+  }, []);
+
+  const requiredDocByType = useMemo(() => {
+    const bucket: Partial<Record<RequiredDocKey, { doc: Doc; file: DocFile }>> = {};
+    const myDocs = MOCK_DOCS["내문서함"] || [];
+
+    for (const doc of myDocs) {
+      const files = [...(doc.files || [])].reverse();
+      for (const file of files) {
+        const key = inferRequiredDocType(file, doc);
+        if (!key || bucket[key] || requiredDocHiddenKeys.has(key)) continue;
+        bucket[key] = { doc, file };
+      }
+    }
+
+    for (const item of REQUIRED_DOCS) {
+      if (requiredDocHiddenKeys.has(item.key)) continue;
+      if (requiredDocOverrides[item.key]) {
+        bucket[item.key] = {
+          doc: {
+            id: `required-${item.key}`,
+            title: item.label,
+            author: "내문서함",
+            date: new Date().toISOString().slice(0, 10),
+            time: "",
+            files: [requiredDocOverrides[item.key]!],
+          },
+          file: requiredDocOverrides[item.key]!,
+        };
+      }
+    }
+
+    return bucket;
+  }, [inferRequiredDocType, requiredDocHiddenKeys, requiredDocOverrides]);
+
+  const submittedRequiredCount = useMemo(
+    () => REQUIRED_DOCS.filter((item) => !!requiredDocByType[item.key]?.file).length,
+    [requiredDocByType],
+  );
+
+  const triggerRequiredUpload = useCallback((key: RequiredDocKey) => {
+    setPendingRequiredDocKey(key);
+    requiredDocInputRef.current?.click();
+  }, []);
+
+  const handleRequiredPreviewClick = useCallback((key: RequiredDocKey) => {
+    const pair = requiredDocByType[key];
+    if (pair?.file) {
+      openDocPreview(pair.doc, pair.file);
+      return;
+    }
+    toast.error("파일을 올려주세요");
+    setRequiredDocPulseKey(key);
+    window.setTimeout(() => setRequiredDocPulseKey((prev) => (prev === key ? null : prev)), 700);
+    triggerRequiredUpload(key);
+  }, [requiredDocByType, triggerRequiredUpload]);
+
+  const onRequiredDocFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files?.[0];
+    const targetKey = pendingRequiredDocKey;
+    e.target.value = "";
+    if (!selected || !targetKey) return;
+
+    const objectUrl = URL.createObjectURL(selected);
+    const nextFile: DocFile = {
+      id: `${targetKey}-${Date.now()}`,
+      name: selected.name,
+      type: selected.type.startsWith("image/") ? "img" : "file",
+      url: objectUrl,
+      size: `${(selected.size / 1024 / 1024).toFixed(2)}MB`,
+      ext: selected.name.split(".").pop()?.toUpperCase() || "",
+      mime: selected.type,
+      docType: targetKey,
+      version: "v1",
+    };
+
+    setRequiredDocOverrides((prev) => ({ ...prev, [targetKey]: nextFile }));
+    setRequiredDocHiddenKeys((prev) => {
+      if (!prev.has(targetKey)) return prev;
+      const next = new Set(prev);
+      next.delete(targetKey);
+      return next;
+    });
+    setPendingRequiredDocKey(null);
+    toast.success("업로드 완료");
+  }, [pendingRequiredDocKey]);
 
   const sanitizeDownloadName = (name: string) => (name || 'file').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'file';
 
@@ -1441,6 +1388,22 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
             name: ensureExt(f.name || `${g.title}_${f.id}`, f.ext || ''),
           }))
         );
+    }
+
+    if (isMyDocs) {
+      return REQUIRED_DOCS.flatMap((item) => {
+        const id = `required-${item.key}`;
+        if (!selectedIds.has(id)) return [];
+        const pair = requiredDocByType[item.key];
+        const file = pair?.file;
+        if (!file) return [];
+        const url = resolveFileUrl(file);
+        if (!url) return [];
+        return [{
+          url,
+          name: ensureExt(file.name || item.label, file.ext || ""),
+        }];
+      });
     }
 
     const docs = (MOCK_DOCS[tabKey] || []).filter(d => selectedIds.has(d.id));
@@ -1533,6 +1496,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     setUploadSiteDropdownOpen(false);
     setUploadDate(today);
     setUploadSiteError(null);
+    setUploadDocName("");
     // PATCH END
     setBpAffOpen(false);
     setBpContractorOpen(false);
@@ -1577,6 +1541,79 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
         return;
       }
 
+      if (isMyDocs) {
+        setBatchBusy(true);
+        try {
+          const docName = uploadDocName.trim();
+          if (!docName) {
+            toast.error("문서명을 입력해주세요");
+            return;
+          }
+          if (!uploadDate) {
+            toast.error("등록일을 선택해주세요");
+            return;
+          }
+
+          const nextByType: Partial<Record<RequiredDocKey, DocFile>> = {};
+          for (const file of selectedFiles) {
+            const inferred = inferRequiredDocType(
+              {
+                id: "",
+                name: file.name,
+                type: file.type.startsWith("image/") ? "img" : "file",
+                url: "",
+                size: "",
+                ext: "",
+                docType: docName,
+              },
+              {
+                id: "",
+                title: docName,
+                author: "내문서함",
+                date: uploadDate,
+                time: "",
+                files: [],
+              },
+            );
+            if (!inferred) continue;
+
+            const objectUrl = URL.createObjectURL(file);
+            nextByType[inferred] = {
+              id: `${inferred}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              name: file.name,
+              type: file.type.startsWith("image/") ? "img" : "file",
+              url: objectUrl,
+              size: `${(file.size / 1024 / 1024).toFixed(2)}MB`,
+              ext: file.name.split(".").pop()?.toUpperCase() || "",
+              mime: file.type,
+              docType: inferred,
+              version: "v1",
+            };
+          }
+
+          const keys = Object.keys(nextByType) as RequiredDocKey[];
+          if (keys.length === 0) {
+            toast.error("문서명/파일명에 필수서류 항목명을 포함해주세요");
+            return;
+          }
+
+          setRequiredDocOverrides((prev) => ({ ...prev, ...nextByType }));
+          setRequiredDocHiddenKeys((prev) => {
+            const next = new Set(prev);
+            keys.forEach((key) => next.delete(key));
+            return next;
+          });
+          setSelectedFiles([]);
+          setUploadDocName("");
+          setUploadDate(today);
+          setUploadSheetOpen(false);
+          toast.success(keys.length === 1 ? "업로드 완료" : `${keys.length}개 항목 업로드 완료`);
+        } finally {
+          setBatchBusy(false);
+        }
+        return;
+      }
+
       if (!uploadSelectedSite) {
         setUploadSiteError("현장명을 선택해주세요");
         toast.error("현장명을 선택해주세요");
@@ -1611,6 +1648,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
         setUploadSiteDropdownOpen(false);
         setUploadSiteError(null);
         setUploadDate(today);
+        setUploadDocName("");
       } catch {
         toast.error("업로드에 실패했습니다.");
       } finally {
@@ -1645,6 +1683,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     setUploadSiteDropdownOpen(false);
     setUploadSiteError(null);
     setUploadDate(today);
+    setUploadDocName("");
     // PATCH END
     setUploadSheetOpen(false);
   };
@@ -1842,14 +1881,12 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
 
   return (
     <div className="animate-fade-in">
-      {/* Optimized Preview Modal */}
-      {previewModal.isOpen && (
-        <PreviewModal
-          file={previewModal.file!}
-          title={previewModal.title || ''}
-          onClose={() => setPreviewModal({ isOpen: false })}
-        />
-      )}
+      <FilePreviewModal
+        open={previewModal.isOpen}
+        file={previewModal.file}
+        title={previewModal.title || ""}
+        onClose={() => setPreviewModal({ isOpen: false })}
+      />
 
       {/* Tab Bar */}
       <div className="flex border-b border-border mb-4 -mx-4 px-1 bg-card -mt-6 pt-6 overflow-x-auto scrollbar-none">
@@ -1906,9 +1943,19 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
             className="w-full h-[50px] bg-card border border-border rounded-2xl px-5 pr-12 text-base font-medium text-foreground placeholder:text-muted-foreground transition-all hover:bg-card hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)] outline-none"
           />
           {search && (
-            <button onClick={() => setSearch('')} className="absolute right-12 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[12px] text-muted-foreground z-10">✕</button>
+            <button
+              onClick={() => setSearch('')}
+              className={cn(
+                "absolute top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[12px] text-muted-foreground z-10",
+                tabKey === "회사서류" ? "right-4" : "right-12"
+              )}
+            >
+              ✕
+            </button>
           )}
-          <Search className="absolute right-[18px] top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+          {tabKey !== "회사서류" && (
+            <Search className="absolute right-[18px] top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+          )}
         </div>
       )}
 
@@ -2007,103 +2054,127 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
           {/* Non-punch cards */}
           {!isPunch && !isBlueprint && (
             <div className="space-y-3 max-[640px]:space-y-2.5">
-              {displayedDocs.length === 0 ? (
-                <EmptyState />
-              ) : displayedDocs.map(doc => {
-                const isSelected = selectedIds.has(doc.id);
-                const hasFile = doc.files && doc.files.length > 0;
-                const repImg = doc.files?.find(f => f.type === 'img');
-                const thumbUrl = repImg ? ((repImg.currentView === 'after' ? repImg.url_after : repImg.url_before) || repImg.url) : null;
-
-                if (isMyDocs) {
-                  // Match "예정" badge tone for "미등록"
-                  const fileStatus = hasFile ? { text: '완료', cls: 'bg-slate-500 text-white' } : { text: '미등록', cls: 'bg-indigo-500 text-white' };
-                  const primary = doc.files?.[0];
-                  const fileName = primary?.name || doc.title;
-                  const version = normalizeVersion(primary?.version || doc.version);
-                  return (
-                    <div key={doc.id} className={cn("bg-card rounded-2xl p-3.5 max-[640px]:p-3 cursor-pointer transition-all shadow-soft relative", isSelected && "border-2 border-primary bg-sky-50/50")}>
-                      <span className={cn("absolute top-0 right-0 text-[11px] font-bold px-2.5 py-1 text-white rounded-tr-xl rounded-bl-xl z-10", fileStatus.cls)}>
-                        {fileStatus.text}
+              {isMyDocs && (
+                <>
+                  <div className="bg-card rounded-xl px-3 py-2 border border-border">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-[13px] font-bold text-text-sub leading-none">필수서류</div>
+                      <span className="ml-auto inline-flex h-6 items-center justify-center rounded-full border border-[#bae6fd] bg-[#e0f2fe] px-2.5 text-[11px] font-extrabold text-[#0284c7] leading-none">
+                        제출 {submittedRequiredCount}/7
                       </span>
-                      <div className="flex gap-2.5 max-[640px]:gap-2 items-center">
-                        <button
-                          type="button"
-                          onClick={() => toggleSelect(doc.id)}
-                          className={cn(
-                            "w-[20px] h-[20px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all bg-transparent p-0 cursor-pointer",
-                            isSelected ? "bg-sky-500 border-sky-500 shadow-[0_2px_8px_rgba(14,165,233,0.3)]" : "bg-card border-muted-foreground/30"
-                          )}
-                          aria-label={isSelected ? "선택 해제" : "선택"}
-                        >
-                          {isSelected && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
-                        </button>
-
-                        <div className="w-[64px] h-[64px] max-[640px]:w-[60px] max-[640px]:h-[60px] rounded-xl bg-muted border border-border overflow-hidden shrink-0 flex items-center justify-center">
-                          {thumbUrl ? <img src={thumbUrl} alt="" className="w-full h-full object-cover" /> : <FileText className="w-7 h-7 text-muted-foreground" />}
-                        </div>
-
-                        <div className="flex-1 min-w-0 flex flex-col gap-0.5 max-[640px]:gap-0.5 pt-0.5 leading-tight">
-                          <div className="flex items-center gap-2">
-                            <div className="text-[16px] font-[800] text-header-navy truncate flex-1 leading-tight">{fileName.replace(/\.[^/.]+$/, "")}</div>
+                    </div>
+                  </div>
+                  {REQUIRED_DOCS.map((item) => {
+                    const pair = requiredDocByType[item.key];
+                    const file = pair?.file;
+                    const hasFile = !!file && !!resolveFileUrl(file);
+                    const selectedId = `required-${item.key}`;
+                    const isSelected = selectedIds.has(selectedId);
+                    const thumbUrl = hasFile && file?.type === "img" ? resolveFileUrl(file) : "";
+                    return (
+                      <div
+                        key={item.key}
+                        className={cn(
+                          "bg-card rounded-2xl p-3 max-[640px]:p-2.5 transition-all shadow-soft relative border border-border",
+                          isSelected && "border-2 border-primary bg-sky-50/50",
+                          requiredDocPulseKey === item.key && "ring-2 ring-indigo-300 scale-[1.01]"
+                        )}
+                      >
+                        <span className={cn("status-badge absolute top-0 right-0 text-[11px] font-bold px-2.5 py-1 text-white rounded-tr-xl rounded-bl-xl z-10", hasFile ? "status-ok bg-slate-500" : "status-none bg-indigo-500")}>
+                          {hasFile ? "제출완료" : "미제출"}
+                        </span>
+                        <div className="flex gap-2 max-[640px]:gap-1.5 items-center">
+                          <button
+                            type="button"
+                            disabled={!hasFile}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!hasFile) return;
+                              toggleSelect(selectedId);
+                            }}
+                            className={cn(
+                              "w-[20px] h-[20px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all bg-transparent p-0",
+                              isSelected ? "bg-sky-500 border-sky-500 shadow-[0_2px_8px_rgba(14,165,233,0.3)]" : "bg-card border-muted-foreground/30",
+                              !hasFile && "opacity-40 cursor-not-allowed"
+                            )}
+                            aria-label={isSelected ? "선택 해제" : "선택"}
+                          >
+                            {isSelected && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
+                          </button>
+                          <div className="w-[56px] h-[56px] max-[640px]:w-[52px] max-[640px]:h-[52px] rounded-xl bg-muted border border-border overflow-hidden shrink-0 flex items-center justify-center">
+                            {thumbUrl ? (
+                              <img src={thumbUrl} alt={item.label} className="w-full h-full object-cover" />
+                            ) : file?.ext?.toLowerCase() === "pdf" ? (
+                              <FileText className="w-7 h-7 text-red-500" />
+                            ) : (
+                              <FileText className="w-7 h-7 text-muted-foreground" />
+                            )}
                           </div>
 
-                          <div className="flex items-center gap-1.5 text-[13px] font-medium text-text-sub leading-tight">
-                            <span className="font-semibold">{doc.author}</span>
-                            <span className="text-muted-foreground">|</span>
-                            <span className="text-muted-foreground">{formatDateShort(doc.date)}</span>
-                            <span className="text-muted-foreground">|</span>
-                            <span className="text-muted-foreground">{version}</span>
-                          </div>
+                          <div className="flex-1 min-w-0 flex flex-col gap-0.5 pt-0.5 leading-tight">
+                            <div className="text-[16px] font-[800] text-header-navy truncate leading-tight">{item.label}</div>
+                            <div className="text-[13px] font-medium text-muted-foreground leading-tight">
+                              {hasFile ? (file?.name || "제출 파일") : "파일을 올려주세요"}
+                            </div>
 
-                          <div className="flex gap-2 max-[640px]:gap-1.5 items-center mt-1.5">
-                            <button
-                              className={cn(
-                                "flex-1 h-[32px] max-[640px]:h-[30px] rounded-[10px] border text-[12px] font-[800] flex items-center justify-center gap-1.5 max-[640px]:gap-1 transition-all duration-200 group",
-                                hasFile
-                                  ? "bg-indigo-50 border-indigo-200 text-indigo-500 font-bold shadow-[0_2px_4px_rgba(99,102,241,0.1)] hover:bg-indigo-100 hover:border-indigo-300 hover:shadow-md hover:scale-[1.02] active:scale-[0.98]"
-                                  : "bg-muted border-border text-muted-foreground opacity-60 cursor-not-allowed"
-                              )}
-                              disabled={!hasFile}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (hasFile && primary) {
-                                  setPreviewModal({ isOpen: true, file: primary, title: doc.title });
-                                }
-                              }}
-                            >
-                              <Eye className="w-3.5 h-3.5 transition-transform duration-200 group-hover:scale-110" />
-                              미리보기
-                            </button>
+                            <div className="flex gap-1.5 max-[640px]:gap-1.5 items-center mt-1">
+                              <div
+                                className="flex-1"
+                                onClick={(e) => {
+                                  if (hasFile) return;
+                                  e.stopPropagation();
+                                  handleRequiredPreviewClick(item.key);
+                                }}
+                              >
+                                <button
+                                  type="button"
+                                  className={cn(
+                                    "action-btn icon-action h-[32px] max-[640px]:h-[30px] w-full rounded-[10px] border text-[12px] font-[800] flex items-center justify-center gap-1.5 max-[640px]:gap-1 transition-all duration-200 group",
+                                    hasFile
+                                      ? "has-file bg-indigo-50 border-indigo-200 text-indigo-500 font-bold shadow-[0_2px_4px_rgba(99,102,241,0.1)] hover:bg-indigo-100 hover:border-indigo-300 hover:shadow-md hover:scale-[1.02] active:scale-[0.98]"
+                                      : "no-file bg-muted border-border text-muted-foreground opacity-60 cursor-not-allowed"
+                                  )}
+                                  disabled={!hasFile}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (hasFile && pair?.doc && pair?.file) {
+                                      openDocPreview(pair.doc, pair.file);
+                                    }
+                                  }}
+                                >
+                                  <Eye className="w-3.5 h-3.5 transition-transform duration-200 group-hover:scale-110" />
+                                  미리보기
+                                </button>
+                              </div>
 
-                            <button 
-                              className="flex-1 h-[32px] max-[640px]:h-[30px] rounded-[10px] border border-[#bae6fd] bg-[#e0f2fe] text-[#0284c7] text-[12px] font-[800] flex items-center justify-center gap-1.5 max-[640px]:gap-1 transition-all duration-200 group hover:bg-[#bae6fd] hover:border-[#7dd3fc] hover:shadow-md hover:scale-[1.02] active:scale-[0.98]"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                // Create file input for upload/change
-                                const input = document.createElement('input');
-                                input.type = 'file';
-                                input.accept = 'image/*,.pdf,.doc,.docx,.hwp,.xls,.xlsx,.ppt,.pptx';
-                                input.onchange = (event: any) => {
-                                  const file = event.target.files?.[0];
-                                  if (file) {
-                                    // Handle file upload/change
-                                    toast.success(`${file.name} 파일을 ${hasFile ? '변경' : '업로드'}합니다.`);
-                                    // TODO: Implement actual file upload logic
-                                  }
-                                };
-                                input.click();
-                              }}
-                            >
-                              <Upload className="w-3.5 h-3.5 transition-transform duration-200 group-hover:scale-110" />
-                              {hasFile ? '변경' : '업로드'}
-                            </button>
+                              <button
+                                type="button"
+                                className="h-[32px] max-[640px]:h-[30px] min-w-[88px] rounded-[10px] border border-[#bae6fd] bg-[#e0f2fe] px-2.5 text-[12px] font-[800] text-[#0284c7] flex items-center justify-center gap-1 transition-all duration-200 hover:bg-[#bae6fd] hover:border-[#7dd3fc] hover:shadow-md hover:scale-[1.02] active:scale-[0.98]"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  triggerRequiredUpload(item.key);
+                                }}
+                              >
+                                <Upload className="w-3.5 h-3.5" />
+                                {hasFile ? "변경하기" : "업로드"}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                }
+                    );
+                  })}
+                </>
+              )}
+
+              {!isMyDocs && (displayedDocs.length === 0 ? (
+                <EmptyState />
+              ) : displayedDocs.map(doc => {
+                const isSelected = selectedIds.has(doc.id);
+                const primaryFile = doc.files?.[0];
+                const hasFile = !!primaryFile && !!resolveFileUrl(primaryFile);
+                const repImg = doc.files?.find(f => f.type === 'img');
+                const thumbUrl = repImg ? ((repImg.currentView === 'after' ? repImg.url_after : repImg.url_before) || repImg.url) : null;
 
                 return (
                   <div key={doc.id} onClick={() => toggleSelect(doc.id)} className={cn("bg-card rounded-2xl p-3.5 max-[640px]:p-3 cursor-pointer transition-all shadow-soft flex gap-2.5 max-[640px]:gap-2 items-center", isSelected && "border-2 border-primary bg-sky-50/50 shadow-[0_0_0_2px_rgba(49,163,250,0.1)]")}>
@@ -2131,12 +2202,12 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                       {doc.contractor ? (
                         <div className="flex items-center gap-1.5">
                           <MapPin className="w-4 h-4 text-text-sub shrink-0" />
-                          <div className="text-[16px] font-[800] text-header-navy truncate flex-1 leading-tight">{doc.files[0]?.name || doc.title}</div>
+                          <div className="text-[16px] font-[800] text-header-navy truncate flex-1 leading-tight">{primaryFile?.name || doc.title}</div>
                         </div>
                       ) : (
                         <div className="flex items-center gap-1.5">
-                          <FileText className="w-4 h-4 text-text-sub shrink-0" />
-                          <div className="text-[16px] font-[800] text-header-navy truncate flex-1 leading-tight">{doc.files[0]?.name || doc.title}</div>
+                          {tabKey !== "회사서류" && <FileText className="w-4 h-4 text-text-sub shrink-0" />}
+                          <div className="text-[16px] font-[800] text-header-navy truncate flex-1 leading-tight">{primaryFile?.name || doc.title}</div>
                         </div>
                       )}
 
@@ -2145,12 +2216,34 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                         <span className="text-muted-foreground">|</span>
                         <span className="text-muted-foreground">{formatDateShort(doc.date)}</span>
                         <span className="text-muted-foreground">|</span>
-                        <span className="text-muted-foreground">{normalizeVersion(doc.files[0]?.version || doc.version)}</span>
+                        <span className="text-muted-foreground">{normalizeVersion(primaryFile?.version || doc.version)}</span>
                       </div>
+
+                      {tabKey === "회사서류" && (
+                        <div className="mt-1.5 flex gap-2">
+                          <button
+                            type="button"
+                            className={cn(
+                              "h-[32px] w-full rounded-[10px] border text-[12px] font-[800] flex items-center justify-center gap-1.5 transition-all duration-200",
+                              hasFile
+                                ? "bg-indigo-50 border-indigo-200 text-indigo-500 hover:bg-indigo-100 hover:border-indigo-300"
+                                : "bg-muted border-border text-muted-foreground opacity-60 cursor-not-allowed"
+                            )}
+                            disabled={!hasFile}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (primaryFile) openDocPreview(doc, primaryFile);
+                            }}
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            미리보기
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
-              })}
+              }))}
             </div>
           )}
 
@@ -2312,6 +2405,14 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
           <Plus className="w-6 h-6" />
         </button>
       )}
+
+      <input
+        ref={requiredDocInputRef}
+        type="file"
+        accept="application/pdf,image/*"
+        onChange={onRequiredDocFileSelect}
+        className="hidden"
+      />
 
       {/* Upload Bottom Sheet */}
       {uploadSheetOpen && (
@@ -2549,88 +2650,101 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
               </>
             ) : (
               <>
-                <div className="mb-4">
-                  {/* PATCH START: site autocomplete (must select from list) */}
-                  <label className="block text-[15px] font-semibold text-text-sub mb-2">현장명 *</label>
-                  <div className="relative">
+                {isMyDocs ? (
+                  <div className="mb-4">
+                    <label className="block text-[15px] font-semibold text-text-sub mb-2">문서명 *</label>
                     <input
                       type="text"
-                      placeholder="현장명을 선택해주세요"
-                      value={uploadSiteQuery}
-                      onChange={(e) => {
-                        const next = e.target.value;
-                        setUploadSiteQuery(next);
-                        setUploadSiteError(null);
-                        setUploadSiteDropdownOpen(true);
-                        if (uploadSelectedSite && next !== uploadSelectedSite.site_name) {
-                          setUploadSelectedSite(null);
-                        }
-                      }}
-                      onFocus={() => setUploadSiteDropdownOpen(true)}
-                      onBlur={() => setTimeout(() => setUploadSiteDropdownOpen(false), 120)}
-                      className="w-full h-[50px] px-4 pr-14 rounded-xl border border-border bg-card text-[18px] text-foreground placeholder:text-muted-foreground transition-all hover:bg-card hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)] outline-none"
-                      aria-invalid={!uploadSelectedSite && !!uploadSiteError}
+                      placeholder="문서명을 입력해주세요"
+                      value={uploadDocName}
+                      onChange={(e) => setUploadDocName(e.target.value)}
+                      className="w-full h-[50px] px-4 rounded-xl border border-border bg-card text-[18px] text-foreground placeholder:text-muted-foreground transition-all hover:bg-card hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)] outline-none"
                     />
-                    {uploadSiteQuery && (
+                  </div>
+                ) : (
+                  <div className="mb-4">
+                    {/* PATCH START: site autocomplete (must select from list) */}
+                    <label className="block text-[15px] font-semibold text-text-sub mb-2">현장명 *</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="현장명을 선택해주세요"
+                        value={uploadSiteQuery}
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setUploadSiteQuery(next);
+                          setUploadSiteError(null);
+                          setUploadSiteDropdownOpen(true);
+                          if (uploadSelectedSite && next !== uploadSelectedSite.site_name) {
+                            setUploadSelectedSite(null);
+                          }
+                        }}
+                        onFocus={() => setUploadSiteDropdownOpen(true)}
+                        onBlur={() => setTimeout(() => setUploadSiteDropdownOpen(false), 120)}
+                        className="w-full h-[50px] px-4 pr-14 rounded-xl border border-border bg-card text-[18px] text-foreground placeholder:text-muted-foreground transition-all hover:bg-card hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)] outline-none"
+                        aria-invalid={!uploadSelectedSite && !!uploadSiteError}
+                      />
+                      {uploadSiteQuery && (
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setUploadSiteQuery("");
+                            setUploadSelectedSite(null);
+                            setUploadSiteError(null);
+                            setUploadSiteDropdownOpen(false);
+                          }}
+                          className="absolute right-10 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-muted flex items-center justify-center text-[12px] text-muted-foreground z-10"
+                          aria-label="현장명 지우기"
+                        >
+                          ✕
+                        </button>
+                      )}
                       <button
                         type="button"
                         onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => {
-                          setUploadSiteQuery("");
-                          setUploadSelectedSite(null);
-                          setUploadSiteError(null);
-                          setUploadSiteDropdownOpen(false);
-                        }}
-                        className="absolute right-10 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-muted flex items-center justify-center text-[12px] text-muted-foreground z-10"
-                        aria-label="현장명 지우기"
+                        onClick={() => setUploadSiteDropdownOpen(v => !v)}
+                        className="absolute right-4 top-1/2 -translate-y-1/2"
+                        aria-label="현장 목록 열기"
                       >
-                        ✕
+                        <ChevronDown className="w-5 h-5 text-muted-foreground" />
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => setUploadSiteDropdownOpen(v => !v)}
-                      className="absolute right-4 top-1/2 -translate-y-1/2"
-                      aria-label="현장 목록 열기"
-                    >
-                      <ChevronDown className="w-5 h-5 text-muted-foreground" />
-                    </button>
 
-                    {uploadSiteDropdownOpen && uploadSiteQuery.trim().length >= 2 && (
-                      <ul className="absolute z-50 left-0 right-0 top-full mt-1.5 max-h-60 overflow-auto bg-card border border-border rounded-xl shadow-lg">
-                        {filteredUploadSites.map(site => (
-                          <li
-                            key={site.site_id}
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              setUploadSelectedSite(site);
-                              setUploadSiteQuery(site.site_name);
-                              setUploadSiteDropdownOpen(false);
-                              setUploadSiteError(null);
-                            }}
-                            className="px-4 py-3.5 cursor-pointer border-b border-border last:border-0 text-[15px] font-medium text-foreground hover:bg-muted"
-                          >
-                            {site.site_name}
-                          </li>
-                        ))}
-                        {filteredUploadSites.length === 0 && (
-                          <li className="px-4 py-3 text-center text-sm text-muted-foreground">
-                            검색 결과가 없습니다
-                          </li>
-                        )}
-                      </ul>
-                    )}
-                  </div>
-                  {/* PATCH START: only show warning after user interaction */}
-                  {(!uploadSelectedSite && (uploadSiteQuery.trim().length > 0 || !!uploadSiteError)) && (
-                    <div className="mt-2 text-[12px] font-semibold text-red-600">
-                      {uploadSiteError || "현장명을 선택해주세요"}
+                      {uploadSiteDropdownOpen && uploadSiteQuery.trim().length >= 2 && (
+                        <ul className="absolute z-50 left-0 right-0 top-full mt-1.5 max-h-60 overflow-auto bg-card border border-border rounded-xl shadow-lg">
+                          {filteredUploadSites.map(site => (
+                            <li
+                              key={site.site_id}
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                setUploadSelectedSite(site);
+                                setUploadSiteQuery(site.site_name);
+                                setUploadSiteDropdownOpen(false);
+                                setUploadSiteError(null);
+                              }}
+                              className="px-4 py-3.5 cursor-pointer border-b border-border last:border-0 text-[15px] font-medium text-foreground hover:bg-muted"
+                            >
+                              {site.site_name}
+                            </li>
+                          ))}
+                          {filteredUploadSites.length === 0 && (
+                            <li className="px-4 py-3 text-center text-sm text-muted-foreground">
+                              검색 결과가 없습니다
+                            </li>
+                          )}
+                        </ul>
+                      )}
                     </div>
-                  )}
-                  {/* PATCH END */}
-                  {/* PATCH END */}
-                </div>
+                    {/* PATCH START: only show warning after user interaction */}
+                    {(!uploadSelectedSite && (uploadSiteQuery.trim().length > 0 || !!uploadSiteError)) && (
+                      <div className="mt-2 text-[12px] font-semibold text-red-600">
+                        {uploadSiteError || "현장명을 선택해주세요"}
+                      </div>
+                    )}
+                    {/* PATCH END */}
+                    {/* PATCH END */}
+                  </div>
+                )}
                 <div className="mb-4">
                   <label className="block text-[15px] font-semibold text-text-sub mb-2">등록일</label>
                   {/* PATCH START: controlled date input */}
@@ -2831,35 +2945,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
 
       {/* PATCH START: report editor overlay UI */}
       {reportEditorOpen && reportModel && (
-        <div id="reportEditorOverlay" className="fixed inset-0 bg-[#1e1e1e] z-[9999] flex flex-col max-w-[600px] mx-auto">
-          <PreviewAppBar
-            title={`${reportModel.title} · ${reportModel.siteName}`}
-            onBack={closeReportEditor}
-            onClose={closeReportEditor}
-            onReset={resetReportEditor}
-            onSave={generateReportPDF}
-            titleClassName="max-w-[220px] truncate sm:max-w-[320px]"
-            className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-[600px] z-[10010]"
-            style={{
-              height: `calc(${REPORT_HEADER_PX}px + env(safe-area-inset-top))`,
-              paddingTop: "env(safe-area-inset-top)",
-              boxSizing: "border-box",
-            }}
-          />
-
-          <PreviewControlBar
-            onZoomOut={() => reportZoom.setScale(reportZoom.scale * 0.9)}
-            onFit={toggleReportFit}
-            onTogglePan={toggleReportPan}
-            onZoomIn={() => reportZoom.setScale(reportZoom.scale * 1.1)}
-            onShare={shareReport}
-            panActive={reportPanMode}
-            fitActive={reportFitMode === "width"}
-            zoomOutDisabled={reportZoom.scale <= Math.max(reportZoom.fitScale || 0.5, 0.5) + 0.01}
-            zoomInDisabled={reportZoom.scale >= 4}
-            className="left-1/2 -translate-x-1/2 max-w-[560px]"
-          />
-
+        <>
           <input
             ref={reportPhotoInputRef}
             type="file"
@@ -2867,53 +2953,29 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
             className="hidden"
             onChange={onReportPhotoChange}
           />
-
-          <div
-            className="bg-[#333] relative overflow-hidden flex-1"
-            style={{
-              paddingTop: `calc(${REPORT_HEADER_PX}px + env(safe-area-inset-top))`,
-              paddingBottom: `calc(${REPORT_CONTROLBAR_PX}px + env(safe-area-inset-bottom) + 20px)`,
-            }}
+          <PreviewModal
+            open={reportEditorOpen}
+            title={`${reportModel.title} · ${reportModel.siteName}`}
+            onBack={closeReportEditor}
+            onClose={closeReportEditor}
+            onSave={generateReportPDF}
+            onShare={shareReport}
+            zoom={reportZoom}
+            contentRef={reportContentRef as unknown as { current: HTMLElement | null }}
+            titleClassName="max-w-[150px] truncate sm:max-w-[320px]"
+            maxWidthClassName="max-w-[600px]"
           >
-            <div
-              ref={reportZoom.containerRef}
-              className="w-full h-full flex items-start justify-center px-3 py-2"
-              style={{
-                touchAction: reportPanMode ? "none" : "pan-y",
-                cursor: reportPanMode && reportZoom.canPan ? (reportZoom.isDragging ? "grabbing" : "grab") : "default",
-              }}
-              onWheel={onReportWheel}
-              onMouseDown={reportPanMode ? reportZoom.onMouseDown : undefined}
-              onMouseMove={reportPanMode ? reportZoom.onMouseMove : undefined}
-              onMouseUp={reportPanMode ? reportZoom.onMouseUp : undefined}
-              onMouseLeave={reportPanMode ? reportZoom.onMouseLeave : undefined}
-              onTouchStart={reportPanMode ? reportZoom.onTouchStart : undefined}
-              onTouchMove={reportPanMode ? reportZoom.onTouchMove : undefined}
-              onTouchEnd={reportPanMode ? reportZoom.onTouchEnd : undefined}
-              onDoubleClick={reportPanMode ? reportZoom.onDoubleClick : undefined}
-            >
+            <div className="px-3 py-2">
               <div
-                className="w-full h-full flex items-start justify-center"
+                key={`${reportModel.groupId}-${reportEditorRenderKey}`}
+                className="bg-white shadow-lg"
                 style={{
-                  transform: `translate(${reportZoom.position.x}px, ${reportZoom.position.y}px) scale(${reportZoom.scale})`,
-                  transformOrigin: "top center",
-                  willChange: "transform",
+                  width: "210mm",
+                  minHeight: "297mm",
+                  padding: "20mm 10mm",
+                  boxSizing: "border-box",
                 }}
               >
-                <div
-                  key={`${reportModel.groupId}-${reportEditorRenderKey}`}
-                  ref={(node) => {
-                    reportContentRef.current = node;
-                    reportZoom.contentRef.current = node;
-                  }}
-                  className="bg-white shadow-lg"
-                  style={{
-                    width: "210mm",
-                    minHeight: "297mm",
-                    padding: "20mm 10mm",
-                    boxSizing: "border-box",
-                  }}
-                >
               <div className="text-center border-b-2 border-[#1a254f] pb-3 mb-4">
                 <div
                   contentEditable
@@ -2944,12 +3006,20 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                 </div>
               </div>
 
-              <table className="w-full border-collapse text-[12px] [table-layout:fixed] [&_th]:align-middle [&_td]:align-middle [&_th]:box-border [&_td]:box-border [&_th]:leading-[1.4] [&_td]:leading-[1.4] [&_td]:break-words [&_td]:whitespace-pre-wrap">
+              <table className="w-full border-collapse text-[12px] [table-layout:fixed] [&_th]:align-middle [&_td]:align-middle [&_th]:box-border [&_td]:box-border [&_th]:leading-[1.4] [&_td]:leading-[1.45] [&_td]:whitespace-pre-wrap [&_td]:break-keep [&_td]:[overflow-wrap:anywhere] [&_td]:px-[10px]">
+                <colgroup>
+                  <col style={{ width: "40px" }} />
+                  <col style={{ width: "96px" }} />
+                  <col style={{ minWidth: "180px" }} />
+                  <col style={{ width: "88px" }} />
+                  <col style={{ width: "88px" }} />
+                  <col style={{ width: "64px" }} />
+                </colgroup>
                 <thead>
                   <tr className="bg-slate-100">
                     <th className="border border-slate-300 p-2 w-10">NO</th>
                     <th className="border border-slate-300 p-2 w-24">위치</th>
-                    <th className="border border-slate-300 p-2">지적 내용</th>
+                    <th className="border border-slate-300 p-2 min-w-[180px]">지적 내용</th>
                     <th className="border border-slate-300 p-2 w-[88px]">조치 전</th>
                     <th className="border border-slate-300 p-2 w-[88px]">조치 후</th>
                     <th className="border border-slate-300 p-2 w-16">상태</th>
@@ -2966,7 +3036,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                           data-report-edit="1"
                           data-item-id={row.id}
                           data-field="location"
-                          className="min-h-[18px] outline-none"
+                          className="min-h-[18px] whitespace-pre-wrap break-keep [overflow-wrap:anywhere] [writing-mode:horizontal-tb] leading-[1.45] outline-none"
                         >
                           {row.location || ""}
                         </div>
@@ -2978,7 +3048,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                           data-report-edit="1"
                           data-item-id={row.id}
                           data-field="issue"
-                          className="min-h-[18px] outline-none"
+                          className="min-h-[18px] whitespace-pre-wrap break-keep [overflow-wrap:anywhere] [writing-mode:horizontal-tb] leading-[1.45] outline-none"
                         >
                           {row.issue || ""}
                         </div>
@@ -3057,155 +3127,11 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                 </tbody>
               </table>
             </div>
-          </div>
-        </div>
-      </div>
-    </div>
+            </div>
+          </PreviewModal>
+        </>
       )}
       {/* PATCH END */}
-    </div>
-  );
-}
-
-// ─── Optimized Preview Modal ───
-interface PreviewModalProps {
-  file: DocFile;
-  title: string;
-  onClose: () => void;
-}
-
-function PreviewModal({ file, title, onClose }: PreviewModalProps) {
-  const isImage = file.type === "img";
-  const zoom = useZoomPan<HTMLImageElement>({ minScale: 0.5, maxScale: 4, autoFit: true });
-
-  // Handle keyboard events (ESC to close)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
-  useEffect(() => {
-    if (!isImage) return;
-    const handle = () => zoom.recalcFit();
-    window.addEventListener("resize", handle);
-    return () => window.removeEventListener("resize", handle);
-  }, [isImage, zoom.recalcFit]);
-
-  return (
-    <div className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-sm">
-      {/* Header */}
-      <div data-no-pan="1" className="absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-black/50 to-transparent p-4">
-        <div className="flex items-center justify-between text-white">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={onClose}
-              className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <div>
-              <h3 className="text-lg font-semibold truncate max-w-[200px] sm:max-w-none">{title}</h3>
-              <p className="text-sm text-white/70">{file.name}</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Content */}
-      <div
-        ref={zoom.containerRef}
-        className="absolute inset-0 flex items-center justify-center p-4 pt-20 pb-16 overflow-hidden"
-        style={{ touchAction: isImage ? "none" : "auto" }}
-        onWheel={isImage ? zoom.onWheel : undefined}
-        onMouseDown={isImage ? zoom.onMouseDown : undefined}
-        onMouseMove={isImage ? zoom.onMouseMove : undefined}
-        onMouseUp={isImage ? zoom.onMouseUp : undefined}
-        onMouseLeave={isImage ? zoom.onMouseLeave : undefined}
-        onTouchStart={isImage ? zoom.onTouchStart : undefined}
-        onTouchMove={isImage ? zoom.onTouchMove : undefined}
-        onTouchEnd={isImage ? zoom.onTouchEnd : undefined}
-        onDoubleClick={isImage ? zoom.onDoubleClick : undefined}
-      >
-        {isImage ? (
-          <img
-            ref={zoom.contentRef}
-            src={file.url}
-            alt={file.name}
-            className="select-none max-w-none max-h-none object-contain"
-            style={{
-              transform: `translate(${zoom.position.x}px, ${zoom.position.y}px) scale(${zoom.scale})`,
-              transformOrigin: "center center",
-              cursor: zoom.canPan ? (zoom.isDragging ? "grabbing" : "grab") : "default",
-            }}
-            draggable={false}
-            onLoad={() => zoom.recalcFit()}
-          />
-        ) : (
-          <div className="w-full h-full bg-white rounded-lg flex items-center justify-center">
-            <div className="text-center">
-              <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <p className="text-lg font-medium text-gray-600 mb-2">{file.name}</p>
-              <p className="text-sm text-gray-500 mb-4">이 파일 형식은 미리보기를 지원하지 않습니다</p>
-              <button
-                onClick={() => window.open(file.url, "_blank", "noopener,noreferrer")}
-                className="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"
-              >
-                외부에서 열기
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Bottom Controls */}
-      {isImage && (
-        <div data-no-pan="1" className="absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/50 to-transparent p-4">
-          <div className="flex items-center justify-center gap-4 text-white">
-            <button
-              data-no-pan="1"
-              onClick={() => zoom.setScale(zoom.scale * 0.85)}
-              className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
-              disabled={zoom.scale <= Math.max(zoom.fitScale, 0.5) + 0.01}
-            >
-              <span className="text-lg font-bold">-</span>
-            </button>
-
-            <span className="text-sm font-medium min-w-[60px] text-center">
-              {Math.round((zoom.scale / (zoom.fitScale || 1)) * 100)}%
-            </span>
-
-            <button
-              data-no-pan="1"
-              onClick={() => zoom.setScale(zoom.scale * 1.15)}
-              className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
-              disabled={zoom.scale >= 4}
-            >
-              <span className="text-lg font-bold">+</span>
-            </button>
-
-            <button
-              data-no-pan="1"
-              onClick={() => zoom.reset()}
-              className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
-              title="화면맞춤"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

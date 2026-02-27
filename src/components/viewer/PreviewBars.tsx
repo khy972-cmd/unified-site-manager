@@ -1,4 +1,4 @@
-﻿import type { CSSProperties } from "react";
+﻿import type { CSSProperties, ReactNode } from "react";
 import { ChevronLeft, Download, Hand, Minus, Plus, RefreshCw, RotateCcw, Share2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -37,14 +37,14 @@ export function PreviewAppBar({
 }: PreviewAppBarProps) {
   return (
     <header className={cn("flex items-center justify-between border-b border-white/15 bg-black px-2", className)} style={style}>
-      <div className="flex items-center gap-1.5">
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">
         <button type="button" onClick={onBack} className="rounded-full p-2 text-white transition active:bg-white/15" aria-label={backAriaLabel}>
           <ChevronLeft className="h-6 w-6" />
         </button>
-        <span className={cn("text-lg-app font-bold text-white", titleClassName)}>{title}</span>
+        <span className={cn("truncate text-lg-app font-bold text-white", titleClassName)}>{title}</span>
       </div>
 
-      <div className="flex items-center gap-1.5">
+      <div className="flex shrink-0 items-center gap-1.5">
         {onReset && (
           <button
             type="button"
@@ -77,7 +77,7 @@ export function PreviewAppBar({
   );
 }
 
-interface PreviewControlBarProps {
+interface FloatingToolbarProps {
   onZoomOut: () => void;
   onFit: () => void;
   onTogglePan: () => void;
@@ -90,7 +90,7 @@ interface PreviewControlBarProps {
   className?: string;
 }
 
-export function PreviewControlBar({
+export function FloatingToolbar({
   onZoomOut,
   onFit,
   onTogglePan,
@@ -101,12 +101,12 @@ export function PreviewControlBar({
   zoomOutDisabled = false,
   zoomInDisabled = false,
   className,
-}: PreviewControlBarProps) {
+}: FloatingToolbarProps) {
   return (
     <div
       data-no-pan="1"
       className={cn(
-        "fixed bottom-[max(12px,env(safe-area-inset-bottom,0px))] left-1/2 z-[10020] grid h-14 w-[calc(100%-24px)] max-w-[560px] -translate-x-1/2 grid-cols-5 items-center rounded-full border border-white/10 bg-[rgba(30,30,30,0.94)] px-2 shadow-xl backdrop-blur-lg",
+        "fixed bottom-[calc(env(safe-area-inset-bottom,0px)+12px)] left-1/2 z-[10005] flex w-[min(92vw,420px)] -translate-x-1/2 items-center justify-between gap-2 rounded-[50px] border border-[#333] bg-[#222] px-4 py-2.5 shadow-[0_10px_30px_rgba(0,0,0,0.5)] backdrop-blur",
         className,
       )}
     >
@@ -115,7 +115,7 @@ export function PreviewControlBar({
         type="button"
         onClick={onZoomOut}
         disabled={zoomOutDisabled}
-        className="h-full min-w-0 w-full rounded-full bg-transparent border-none text-white flex flex-col items-center justify-center gap-0.5 text-[10px] sm:text-[11px] font-medium opacity-80 hover:opacity-100 disabled:opacity-40 cursor-pointer"
+        className="flex min-h-11 min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 rounded-full border-none bg-transparent text-[10px] font-medium text-white opacity-80 transition-opacity hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
       >
         <Minus className="w-5 h-5" />
         축소
@@ -126,7 +126,7 @@ export function PreviewControlBar({
         type="button"
         onClick={onFit}
         className={cn(
-          "h-full min-w-0 w-full rounded-full bg-transparent border-none flex flex-col items-center justify-center gap-0.5 text-[10px] sm:text-[11px] font-medium cursor-pointer",
+          "flex min-h-11 min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 rounded-full border-none bg-transparent text-[10px] font-medium transition-opacity",
           fitActive ? "text-primary opacity-100 font-bold" : "text-white opacity-80 hover:opacity-100",
         )}
       >
@@ -139,7 +139,7 @@ export function PreviewControlBar({
         type="button"
         onClick={onTogglePan}
         className={cn(
-          "h-full min-w-0 w-full rounded-full bg-transparent border-none flex flex-col items-center justify-center gap-0.5 text-[10px] sm:text-[11px] font-medium cursor-pointer",
+          "flex min-h-11 min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 rounded-full border-none bg-transparent text-[10px] font-medium transition-opacity",
           panActive ? "text-primary opacity-100 font-bold" : "text-white opacity-80 hover:opacity-100",
         )}
       >
@@ -152,7 +152,7 @@ export function PreviewControlBar({
         type="button"
         onClick={onZoomIn}
         disabled={zoomInDisabled}
-        className="h-full min-w-0 w-full rounded-full bg-transparent border-none text-white flex flex-col items-center justify-center gap-0.5 text-[10px] sm:text-[11px] font-medium opacity-80 hover:opacity-100 disabled:opacity-40 cursor-pointer"
+        className="flex min-h-11 min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 rounded-full border-none bg-transparent text-[10px] font-medium text-white opacity-80 transition-opacity hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
       >
         <Plus className="w-5 h-5" />
         확대
@@ -162,11 +162,46 @@ export function PreviewControlBar({
         data-no-pan="1"
         type="button"
         onClick={onShare}
-        className="h-full min-w-0 w-full rounded-full bg-transparent border-none text-white flex flex-col items-center justify-center gap-0.5 text-[10px] sm:text-[11px] font-medium opacity-80 hover:opacity-100 cursor-pointer"
+        className="flex min-h-11 min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 rounded-full border-none bg-transparent text-[10px] font-medium text-white opacity-80 transition-opacity hover:opacity-100"
       >
         <Share2 className="w-5 h-5" />
         공유
       </button>
+    </div>
+  );
+}
+
+export function PreviewControlBar(props: FloatingToolbarProps) {
+  return <FloatingToolbar {...props} />;
+}
+
+interface PreviewViewportProps {
+  children: ReactNode;
+  headerHeightPx: number;
+  toolbarHeightPx: number;
+  className?: string;
+  style?: CSSProperties;
+}
+
+export function PreviewViewport({
+  children,
+  headerHeightPx,
+  toolbarHeightPx,
+  className,
+  style,
+}: PreviewViewportProps) {
+  return (
+    <div
+      className={cn("relative flex-1 overflow-auto overscroll-contain bg-[#333]", className)}
+      style={{
+        WebkitOverflowScrolling: "touch",
+        touchAction: "pan-x pan-y pinch-zoom",
+        paddingTop: `calc(${headerHeightPx}px + env(safe-area-inset-top))`,
+        paddingBottom: `calc(${toolbarHeightPx}px + env(safe-area-inset-bottom) + 12px)`,
+        ...style,
+      }}
+    >
+      {children}
     </div>
   );
 }
