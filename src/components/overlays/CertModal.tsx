@@ -8,7 +8,11 @@ interface CertModalProps {
 }
 
 const SHEET_ANIMATION_MS = 280;
-const CERT_SRC = `${import.meta.env.BASE_URL}@confirm3.html`;
+const CERT_VER =
+  import.meta.env.VITE_CERT_VER ??
+  import.meta.env.VITE_VERCEL_GIT_COMMIT_SHA ??
+  "dev";
+const CERT_SRC = `${import.meta.env.BASE_URL}@confirm3.html?v=${CERT_VER}`;
 const VIEWPORT_META_CONTENT =
   "width=device-width, initial-scale=1.0, minimum-scale=0.5, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover";
 
