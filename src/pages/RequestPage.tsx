@@ -8,8 +8,7 @@ const OFFLINE_TOAST_MESSAGE = "\uC624\uD504\uB77C\uC778\uC5D0\uC11C\uB294 \uCE74
 const DEFAULT_CHANNEL_URL = "https://pf.kakao.com/_xfgxdqX";
 const DEFAULT_CHAT_URL = "https://pf.kakao.com/_xfgxdqX/chat";
 const PAGE_TITLE = "\uBCF8\uC0AC\uC694\uCCAD";
-const PAGE_DESCRIPTION =
-  "\uCE74\uCE74\uC624\uD1A1\uC73C\uB85C \uBCF8\uC0AC\uC5D0 \uBB38\uC758\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4. (\uC624\uD504\uB77C\uC778\uC5D0\uC11C\uB294 \uC0AC\uC6A9 \uBD88\uAC00)";
+const PAGE_DESCRIPTION = "카카오톡으로 본사 문의 (오프라인 사용 불가)";
 const FOLLOW_BUTTON_LABEL = "\uCC44\uB110 \uCD94\uAC00(\uAC04\uD3B8)";
 const CHAT_BUTTON_LABEL = "1:1 \uCC44\uD305";
 const FOLLOW_SUCCESS_MESSAGE = "\uCC44\uB110 \uCD94\uAC00 \uC644\uB8CC";
@@ -108,10 +107,13 @@ export default function RequestPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="mx-auto w-full max-w-md p-4">
-        <Card className="rounded-2xl shadow-soft">
+      <div className="p-4">
+        <Card className="rounded-2xl shadow-soft mb-4">
           <CardHeader className="space-y-2 pb-4">
-            <CardTitle className="text-2xl font-[800] text-header-navy">{PAGE_TITLE}</CardTitle>
+            <div className="flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" className="lucide lucide-phone-call text-header-navy"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path><path d="M14.05 2a9 9 0 0 1 8 7.94"></path></svg>
+              <CardTitle className="text-xl-app font-bold text-header-navy">{PAGE_TITLE}</CardTitle>
+            </div>
             <CardDescription className="text-base font-medium leading-relaxed text-text-sub">{PAGE_DESCRIPTION}</CardDescription>
           </CardHeader>
 
@@ -120,7 +122,7 @@ export default function RequestPage() {
               <Button
                 type="button"
                 variant="outline"
-                className="h-[50px] w-full text-base font-semibold"
+                className="h-[50px] w-full text-base font-semibold border-[#FEE500] text-[#3C1E1E] bg-[#FEE500]/10 hover:bg-[#FEE500]/20 transition-all"
                 disabled={!isOnline}
                 onClick={handleFollowChannel}
               >
@@ -131,7 +133,7 @@ export default function RequestPage() {
             <div className="w-full" onClick={handleOfflineClick}>
               <Button
                 type="button"
-                className="h-[50px] w-full text-base font-semibold"
+                className="h-[50px] w-full text-base font-semibold bg-[#FEE500] text-[#3C1E1E] hover:bg-[#FEE500]/90 transition-all shadow-sm"
                 disabled={!isOnline}
                 onClick={handleChat}
               >
