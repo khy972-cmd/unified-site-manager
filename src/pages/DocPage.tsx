@@ -6,6 +6,7 @@ import {
 import { Drawer } from "vaul";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { PreviewAppBar, PreviewControlBar } from "@/components/viewer/PreviewBars";
 // PATCH START: shared site list + repo facade (no direct localStorage in UI)
 import { useSiteList } from "@/hooks/useSiteList";
 import { searchSites, type SiteListItem } from "@/lib/siteList";
@@ -549,8 +550,10 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
   const reportPhotoInputRef = useRef<HTMLInputElement>(null);
   const [reportPhotoTarget, setReportPhotoTarget] = useState<{ itemId: string; field: "beforePhoto" | "afterPhoto" } | null>(null);
   const reportZoom = useZoomPan<HTMLDivElement>({ minScale: 0.5, maxScale: 4, autoFit: true });
-  const REPORT_HEADER_PX = 56;
-  const REPORT_TOOLBAR_PX = 48;
+  const [reportPanMode, setReportPanMode] = useState(false);
+  const [reportFitMode, setReportFitMode] = useState<"page" | "width">("width");
+  const REPORT_HEADER_PX = 60;
+  const REPORT_CONTROLBAR_PX = 86;
   // PATCH END
 
   // Supabase-backed punch data
@@ -789,6 +792,8 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
 
   useEffect(() => {
     if (!reportEditorOpen) return;
+    setReportPanMode(false);
+    setReportFitMode("width");
     const handle = () => {
       const container = reportZoom.containerRef.current;
       const content = reportZoom.contentRef.current;
@@ -797,7 +802,10 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
       const paddingX = (parseFloat(styles.paddingLeft || "0") || 0) + (parseFloat(styles.paddingRight || "0") || 0);
       const available = Math.max(0, container.clientWidth - paddingX);
       const next = available / content.offsetWidth;
-      if (Number.isFinite(next) && next > 0) reportZoom.reset(next);
+      if (Number.isFinite(next) && next > 0) {
+        reportZoom.reset(next);
+        setReportFitMode("width");
+      }
     };
     const handleOrientation = () => window.setTimeout(handle, 60);
     const raf = window.requestAnimationFrame(handle);
@@ -958,6 +966,8 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
       date: group.date,
       rows,
     });
+    setReportPanMode(false);
+    setReportFitMode("width");
     setReportEditorOpen(true);
   }, [detailGroupId, selectedIds, punchGroups, reportEdits]);
 
@@ -966,7 +976,42 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     setReportEditorOpen(false);
     setReportModel(null);
     setReportPhotoTarget(null);
+    setReportPanMode(false);
+    setReportFitMode("width");
   }, [flushReportEditsToState]);
+
+  const resetReportEditor = useCallback(() => {
+    if (!reportModel) return;
+    const group = punchGroups.find(g => g.id === reportModel.groupId);
+    if (!group) return;
+
+    setReportEdits(prev => {
+      const next = { ...prev };
+      delete next[reportModel.groupId];
+      return next;
+    });
+
+    const rows: PunchReportRow[] = (group.punchItems || []).map((item) => ({
+      id: item.id,
+      location: item.location ?? "",
+      issue: item.issue ?? "",
+      status: item.status,
+      beforePhoto: item.beforePhoto,
+      afterPhoto: item.afterPhoto,
+    }));
+
+    setReportModel({
+      groupId: group.id,
+      title: "조치 사항 점검 보고서",
+      siteName: group.title,
+      date: group.date,
+      rows,
+    });
+    setReportPhotoTarget(null);
+    setReportPanMode(false);
+    setReportFitMode("width");
+    toast.success("입력을 초기화했습니다.");
+  }, [punchGroups, reportModel]);
 
   const fitReportWidth = useCallback(() => {
     const container = reportZoom.containerRef.current;
@@ -976,8 +1021,28 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     const paddingX = (parseFloat(styles.paddingLeft || "0") || 0) + (parseFloat(styles.paddingRight || "0") || 0);
     const available = Math.max(0, container.clientWidth - paddingX);
     const next = available / content.offsetWidth;
-    if (Number.isFinite(next) && next > 0) reportZoom.reset(next);
+    if (Number.isFinite(next) && next > 0) {
+      reportZoom.reset(next);
+      setReportFitMode("width");
+    }
   }, [reportZoom]);
+
+  const fitReportPage = useCallback(() => {
+    reportZoom.reset();
+    setReportFitMode("page");
+  }, [reportZoom]);
+
+  const toggleReportFit = useCallback(() => {
+    if (reportFitMode === "width") {
+      fitReportPage();
+      return;
+    }
+    fitReportWidth();
+  }, [fitReportPage, fitReportWidth, reportFitMode]);
+
+  const toggleReportPan = useCallback(() => {
+    setReportPanMode(prev => !prev);
+  }, []);
 
   const onReportWheel = useCallback((e: React.WheelEvent) => {
     if (!e.ctrlKey && !e.metaKey) return;
@@ -1187,6 +1252,61 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
       toast.error("PDF 생성 중 오류가 발생했습니다.");
     }
   }, [ensureReportPdfLibs, flushReportEditsToState, reportModel]);
+
+  const shareReport = useCallback(async () => {
+    flushReportEditsToState();
+    if (!reportModel) return;
+
+    const source = reportContentRef.current;
+    if (!source) {
+      toast.error("공유할 보고서 내용을 찾을 수 없습니다.");
+      return;
+    }
+
+    if (!navigator.share) {
+      await generateReportPDF();
+      return;
+    }
+
+    try {
+      await ensureReportPdfLibs();
+      const w = window as typeof window & { html2canvas?: any };
+      const html2canvas = w.html2canvas;
+      if (!html2canvas) {
+        await generateReportPDF();
+        return;
+      }
+
+      const canvas = await html2canvas(source, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        logging: false,
+      });
+
+      const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/png", 0.95));
+      if (!blob) {
+        await generateReportPDF();
+        return;
+      }
+
+      const datePart = (reportModel.date || new Date().toISOString().split("T")[0]).slice(0, 10);
+      const sitePart = (reportModel.siteName || "현장").replace(/[\\/:*?\"<>|]+/g, "_").trim() || "현장";
+      const fileName = `${datePart}-${sitePart}-보고서.png`;
+      const shareFile = new File([blob], fileName, { type: "image/png" });
+
+      if (navigator.canShare?.({ files: [shareFile] })) {
+        await navigator.share({ title: "조치보고서 공유", files: [shareFile] });
+        toast.success("공유했습니다.");
+        return;
+      }
+
+      await generateReportPDF();
+    } catch (e: any) {
+      if (e?.name === "AbortError") return;
+      await generateReportPDF();
+    }
+  }, [ensureReportPdfLibs, flushReportEditsToState, generateReportPDF, reportModel]);
   // PATCH END
 
   // Punch item actions
@@ -2704,25 +2824,35 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
 
       {/* PATCH START: report editor overlay UI */}
       {reportEditorOpen && reportModel && (
-          <div id="reportEditorOverlay" className="fixed inset-0 bg-[#1e1e1e] z-[9999] flex flex-col max-w-[600px] mx-auto">
-            <div
-              className="px-4 border-b border-[#333] flex justify-between items-center bg-black shrink-0"
-              style={{
-                height: `calc(${REPORT_HEADER_PX}px + env(safe-area-inset-top))`,
-                paddingTop: "env(safe-area-inset-top)",
-                boxSizing: "border-box",
-              }}
-            >
-            <button onClick={closeReportEditor} className="bg-transparent border-none text-white cursor-pointer p-1">
-              <ArrowLeft className="w-6 h-6" />
-            </button>
-            <div className="text-white font-bold text-[13px] text-center max-w-[70%] truncate">
-              {reportModel.title} · {reportModel.siteName}
-            </div>
-            <button onClick={generateReportPDF} className="bg-transparent border-none text-white cursor-pointer p-1">
-              <Download className="w-6 h-6" />
-            </button>
-          </div>
+        <div id="reportEditorOverlay" className="fixed inset-0 bg-[#1e1e1e] z-[9999] flex flex-col max-w-[600px] mx-auto">
+          <PreviewAppBar
+            title={`${reportModel.title} · ${reportModel.siteName}`}
+            onBack={closeReportEditor}
+            onClose={closeReportEditor}
+            onReset={resetReportEditor}
+            onSave={generateReportPDF}
+            titleClassName="max-w-[220px] truncate sm:max-w-[320px]"
+            className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-[600px] z-[10010]"
+            style={{
+              height: `calc(${REPORT_HEADER_PX}px + env(safe-area-inset-top))`,
+              paddingTop: "env(safe-area-inset-top)",
+              boxSizing: "border-box",
+            }}
+          />
+
+          <PreviewControlBar
+            onZoomOut={() => reportZoom.setScale(reportZoom.scale * 0.9)}
+            onFit={toggleReportFit}
+            onTogglePan={toggleReportPan}
+            onZoomIn={() => reportZoom.setScale(reportZoom.scale * 1.1)}
+            onShare={shareReport}
+            panActive={reportPanMode}
+            fitActive={reportFitMode === "width"}
+            zoomOutDisabled={reportZoom.scale <= Math.max(reportZoom.fitScale || 0.5, 0.5) + 0.01}
+            zoomInDisabled={reportZoom.scale >= 4}
+            className="left-1/2 -translate-x-1/2 max-w-[560px]"
+          />
+
           <input
             ref={reportPhotoInputRef}
             type="file"
@@ -2732,66 +2862,28 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
           />
 
           <div
-            data-no-pan="1"
-            className="shrink-0 bg-black/80 border-b border-[#222]"
-            style={{ height: REPORT_TOOLBAR_PX }}
-          >
-            <div className="h-full px-3 flex items-center gap-2 overflow-x-auto whitespace-nowrap">
-              <button
-                data-no-pan="1"
-                onClick={() => reportZoom.setScale(reportZoom.scale * 0.9)}
-                className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm"
-              >
-                -
-              </button>
-              <span className="text-[12px] font-semibold min-w-[52px] text-center">
-                {Math.round((reportZoom.scale / (reportZoom.fitScale || 1)) * 100)}%
-              </span>
-              <button
-                data-no-pan="1"
-                onClick={() => reportZoom.setScale(reportZoom.scale * 1.1)}
-                className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm"
-              >
-                +
-              </button>
-              <button
-                data-no-pan="1"
-                onClick={() => reportZoom.reset()}
-                className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center"
-                title="화면맞춤"
-              >
-                <RefreshCw className="w-4 h-4" />
-              </button>
-              <button
-                data-no-pan="1"
-                onClick={fitReportWidth}
-                className="px-2 py-1 rounded-full bg-white/10 hover:bg-white/20 text-[11px] font-semibold whitespace-nowrap"
-              >
-                Fit W
-              </button>
-            </div>
-          </div>
-
-          <div
-            className="bg-[#333] relative overflow-hidden"
-            style={{ height: `calc(100dvh - ${REPORT_HEADER_PX}px - ${REPORT_TOOLBAR_PX}px - env(safe-area-inset-top))` }}
+            className="bg-[#333] relative overflow-hidden flex-1"
+            style={{
+              paddingTop: `calc(${REPORT_HEADER_PX}px + env(safe-area-inset-top))`,
+              paddingBottom: `calc(${REPORT_CONTROLBAR_PX}px + env(safe-area-inset-bottom) + 20px)`,
+            }}
           >
             <div
               ref={reportZoom.containerRef}
               className="w-full h-full flex items-start justify-center px-3 py-2"
               style={{
-                touchAction: "none",
-                cursor: reportZoom.canPan ? (reportZoom.isDragging ? "grabbing" : "grab") : "default",
+                touchAction: reportPanMode ? "none" : "pan-y",
+                cursor: reportPanMode && reportZoom.canPan ? (reportZoom.isDragging ? "grabbing" : "grab") : "default",
               }}
               onWheel={onReportWheel}
-              onMouseDown={reportZoom.onMouseDown}
-              onMouseMove={reportZoom.onMouseMove}
-              onMouseUp={reportZoom.onMouseUp}
-              onMouseLeave={reportZoom.onMouseLeave}
-              onTouchStart={reportZoom.onTouchStart}
-              onTouchMove={reportZoom.onTouchMove}
-              onTouchEnd={reportZoom.onTouchEnd}
-              onDoubleClick={reportZoom.onDoubleClick}
+              onMouseDown={reportPanMode ? reportZoom.onMouseDown : undefined}
+              onMouseMove={reportPanMode ? reportZoom.onMouseMove : undefined}
+              onMouseUp={reportPanMode ? reportZoom.onMouseUp : undefined}
+              onMouseLeave={reportPanMode ? reportZoom.onMouseLeave : undefined}
+              onTouchStart={reportPanMode ? reportZoom.onTouchStart : undefined}
+              onTouchMove={reportPanMode ? reportZoom.onTouchMove : undefined}
+              onTouchEnd={reportPanMode ? reportZoom.onTouchEnd : undefined}
+              onDoubleClick={reportPanMode ? reportZoom.onDoubleClick : undefined}
             >
               <div
                 className="w-full h-full flex items-start justify-center"

@@ -1,6 +1,6 @@
 ﻿import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, Download, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
+import { PreviewAppBar } from "@/components/viewer/PreviewBars";
 
 interface CertModalProps {
   isOpen: boolean;
@@ -139,46 +139,20 @@ export default function CertModal({ isOpen, onClose }: CertModalProps) {
         }`}
         style={{ paddingTop: "env(safe-area-inset-top)" }}
       >
-        <header className="flex h-[60px] min-h-[60px] items-center justify-between border-b border-white/15 bg-black px-2">
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={onClose}
-              className="rounded-full p-2 text-white transition active:bg-white/15"
-              aria-label="이전"
-            >
-              <ChevronLeft className="h-6 w-6" />
-            </button>
-            <span className="text-lg-app font-bold text-white">작업완료확인서</span>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => clickInnerButton("btnReset")}
-              disabled={!frameReady}
-              className="rounded-full p-2 text-white transition active:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label="확인서 초기화"
-            >
-              <RotateCcw className="h-5 w-5" />
-            </button>
-
-            <button
-              onClick={() => clickInnerButton("btnDownload")}
-              disabled={!frameReady}
-              className="rounded-full p-2 text-white transition active:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label="확인서 저장"
-            >
-              <Download className="h-5 w-5" />
-            </button>
-
-            <button
-              onClick={onClose}
-              className="rounded-full p-2 text-white transition active:bg-white/15"
-              aria-label="확인서 닫기"
-            >
-              <X className="h-6 w-6" />
-            </button>
-          </div>
-        </header>
+        <PreviewAppBar
+          title="작업완료확인서"
+          onBack={onClose}
+          onClose={onClose}
+          onReset={() => clickInnerButton("btnReset")}
+          onSave={() => clickInnerButton("btnDownload")}
+          resetDisabled={!frameReady}
+          saveDisabled={!frameReady}
+          backAriaLabel="이전"
+          resetAriaLabel="확인서 초기화"
+          saveAriaLabel="확인서 저장"
+          closeAriaLabel="확인서 닫기"
+          className="h-[60px] min-h-[60px]"
+        />
 
         <div className="relative flex-1 bg-black">
           <iframe
