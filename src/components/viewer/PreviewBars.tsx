@@ -106,7 +106,7 @@ export function PreviewControlBar({
     <div
       data-no-pan="1"
       className={cn(
-        "fixed bottom-[max(10px,env(safe-area-inset-bottom,0px))] left-1/2 z-[10020] flex w-[calc(100%-20px)] max-w-[560px] -translate-x-1/2 items-center justify-between rounded-full border border-white/10 bg-[rgba(30,30,30,0.92)] px-5 py-2 shadow-xl backdrop-blur-lg",
+        "fixed bottom-[max(12px,env(safe-area-inset-bottom,0px))] left-1/2 z-[10020] grid h-14 w-[calc(100%-24px)] max-w-[560px] -translate-x-1/2 grid-cols-5 items-center rounded-full border border-white/10 bg-[rgba(30,30,30,0.94)] px-2 shadow-xl backdrop-blur-lg",
         className,
       )}
     >
@@ -115,7 +115,7 @@ export function PreviewControlBar({
         type="button"
         onClick={onZoomOut}
         disabled={zoomOutDisabled}
-        className="min-w-10 bg-transparent border-none text-white flex flex-col items-center gap-1 text-[11px] font-medium opacity-80 hover:opacity-100 disabled:opacity-40 cursor-pointer"
+        className="h-full min-w-0 w-full rounded-full bg-transparent border-none text-white flex flex-col items-center justify-center gap-0.5 text-[10px] sm:text-[11px] font-medium opacity-80 hover:opacity-100 disabled:opacity-40 cursor-pointer"
       >
         <Minus className="w-5 h-5" />
         축소
@@ -126,7 +126,7 @@ export function PreviewControlBar({
         type="button"
         onClick={onFit}
         className={cn(
-          "min-w-10 bg-transparent border-none flex flex-col items-center gap-1 text-[11px] font-medium cursor-pointer",
+          "h-full min-w-0 w-full rounded-full bg-transparent border-none flex flex-col items-center justify-center gap-0.5 text-[10px] sm:text-[11px] font-medium cursor-pointer",
           fitActive ? "text-primary opacity-100 font-bold" : "text-white opacity-80 hover:opacity-100",
         )}
       >
@@ -139,7 +139,7 @@ export function PreviewControlBar({
         type="button"
         onClick={onTogglePan}
         className={cn(
-          "min-w-10 bg-transparent border-none flex flex-col items-center gap-1 text-[11px] font-medium cursor-pointer",
+          "h-full min-w-0 w-full rounded-full bg-transparent border-none flex flex-col items-center justify-center gap-0.5 text-[10px] sm:text-[11px] font-medium cursor-pointer",
           panActive ? "text-primary opacity-100 font-bold" : "text-white opacity-80 hover:opacity-100",
         )}
       >
@@ -152,7 +152,7 @@ export function PreviewControlBar({
         type="button"
         onClick={onZoomIn}
         disabled={zoomInDisabled}
-        className="min-w-10 bg-transparent border-none text-white flex flex-col items-center gap-1 text-[11px] font-medium opacity-80 hover:opacity-100 disabled:opacity-40 cursor-pointer"
+        className="h-full min-w-0 w-full rounded-full bg-transparent border-none text-white flex flex-col items-center justify-center gap-0.5 text-[10px] sm:text-[11px] font-medium opacity-80 hover:opacity-100 disabled:opacity-40 cursor-pointer"
       >
         <Plus className="w-5 h-5" />
         확대
@@ -162,7 +162,7 @@ export function PreviewControlBar({
         data-no-pan="1"
         type="button"
         onClick={onShare}
-        className="min-w-10 bg-transparent border-none text-white flex flex-col items-center gap-1 text-[11px] font-medium opacity-80 hover:opacity-100 cursor-pointer"
+        className="h-full min-w-0 w-full rounded-full bg-transparent border-none text-white flex flex-col items-center justify-center gap-0.5 text-[10px] sm:text-[11px] font-medium opacity-80 hover:opacity-100 cursor-pointer"
       >
         <Share2 className="w-5 h-5" />
         공유

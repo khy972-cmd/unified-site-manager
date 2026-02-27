@@ -550,6 +550,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
   const reportPhotoInputRef = useRef<HTMLInputElement>(null);
   const [reportPhotoTarget, setReportPhotoTarget] = useState<{ itemId: string; field: "beforePhoto" | "afterPhoto" } | null>(null);
   const reportZoom = useZoomPan<HTMLDivElement>({ minScale: 0.5, maxScale: 4, autoFit: true });
+  const [reportEditorRenderKey, setReportEditorRenderKey] = useState(0);
   const [reportPanMode, setReportPanMode] = useState(false);
   const [reportFitMode, setReportFitMode] = useState<"page" | "width">("width");
   const REPORT_HEADER_PX = 60;
@@ -966,6 +967,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
       date: group.date,
       rows,
     });
+    setReportEditorRenderKey(prev => prev + 1);
     setReportPanMode(false);
     setReportFitMode("width");
     setReportEditorOpen(true);
@@ -981,6 +983,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
   }, [flushReportEditsToState]);
 
   const resetReportEditor = useCallback(() => {
+    flushReportEditsToState();
     if (!reportModel) return;
     const group = punchGroups.find(g => g.id === reportModel.groupId);
     if (!group) return;
@@ -1007,11 +1010,12 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
       date: group.date,
       rows,
     });
+    setReportEditorRenderKey(prev => prev + 1);
     setReportPhotoTarget(null);
     setReportPanMode(false);
     setReportFitMode("width");
     toast.success("입력을 초기화했습니다.");
-  }, [punchGroups, reportModel]);
+  }, [flushReportEditsToState, punchGroups, reportModel]);
 
   const fitReportWidth = useCallback(() => {
     const container = reportZoom.containerRef.current;
@@ -1198,8 +1202,8 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
         const pdf = new jsPDF("p", "mm", "a4");
         const pageWidthMm = 210;
         const pageHeightMm = 297;
-        const marginX = 10;
-        const marginY = 12;
+        const marginX = 0;
+        const marginY = 0;
         const usableW = pageWidthMm - marginX * 2;
         const usableH = pageHeightMm - marginY * 2;
         const mmPerPx = usableW / canvas.width;
@@ -1225,6 +1229,9 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
 
           if (breakY <= y + 10) {
             breakY = targetEnd;
+          }
+          if (canvas.height - breakY <= 8 || canvas.height - y <= pageHeightPx + 8) {
+            breakY = canvas.height;
           }
 
           const sliceH = breakY - y;
@@ -2894,6 +2901,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                 }}
               >
                 <div
+                  key={`${reportModel.groupId}-${reportEditorRenderKey}`}
                   ref={(node) => {
                     reportContentRef.current = node;
                     reportZoom.contentRef.current = node;
