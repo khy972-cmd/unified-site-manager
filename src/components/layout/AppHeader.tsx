@@ -74,7 +74,7 @@ export default function AppHeader({ onSearch, onCert, onNotify, onMenu, notifica
             <button
               onClick={() => navigate(tab.path)}
               className={cn(
-                "relative flex-1 min-w-0 h-full inline-flex items-center justify-center px-1 bg-transparent border-none text-[16px] font-bold tracking-[-0.2px] whitespace-nowrap cursor-pointer transition-colors duration-150",
+                "relative flex-1 min-w-0 h-full inline-flex items-center justify-center px-1 bg-transparent border-none text-[17px] font-bold tracking-[-0.2px] whitespace-nowrap cursor-pointer transition-colors duration-150",
                 activeTab === tab.key 
                   ? "text-header-navy" 
                   : "text-muted-foreground hover:text-foreground/70",

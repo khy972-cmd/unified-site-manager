@@ -1,7 +1,7 @@
-﻿import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   Search, MapPin, ChevronDown, ChevronUp, Pin, PinOff, Phone, Ruler,
-  Camera, FileCheck2, ClipboardList, CheckCircle2, X, Plus, Map as MapIcon, Copy
+  Camera, FileCheck2, ClipboardList, CheckCircle2, X, Map as MapIcon, Copy, Pencil, Upload, Eye
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -70,6 +70,21 @@ const FILTERS: { key: SiteStatus; label: string; chipClass: string }[] = [
   { key: "done", label: "완료", chipClass: "status-done" },
 ];
 
+type SiteDrawingKind = "original" | "marked" | "final";
+type SiteDrawingSource = "linked" | "upload" | "approved";
+
+interface SiteDrawingAsset {
+  id: string;
+  name: string;
+  url: string;
+  kind: SiteDrawingKind;
+  source: SiteDrawingSource;
+  createdAt: string;
+}
+
+type SiteDrawingStore = Record<string, SiteDrawingAsset[]>;
+const SITE_DRAWING_STORE_KEY = "inopnc_site_drawings_v1";
+
 declare global {
   interface Window {
     daum?: any;
@@ -106,6 +121,40 @@ async function openDaumPostcode(): Promise<string> {
   });
 }
 
+function readSiteDrawingStore(): SiteDrawingStore {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = JSON.parse(localStorage.getItem(SITE_DRAWING_STORE_KEY) || "{}");
+    if (!raw || typeof raw !== "object") return {};
+    return raw as SiteDrawingStore;
+  } catch {
+    return {};
+  }
+}
+
+function writeSiteDrawingStore(store: SiteDrawingStore) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(SITE_DRAWING_STORE_KEY, JSON.stringify(store));
+}
+
+function siteDrawingKey(site: SiteData) {
+  return site.siteDbId || site.name;
+}
+
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => resolve(String(ev.target?.result || ""));
+    reader.onerror = () => reject(new Error("file_read_failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function buildDrawingPlaceholder(name: string) {
+  const safe = encodeURIComponent(name || "공사도면 원본");
+  return `data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1000' height='700'%3E%3Crect width='1000' height='700' fill='%23ffffff'/%3E%3Crect x='18' y='18' width='964' height='664' fill='none' stroke='%231a254f' stroke-width='4'/%3E%3Ctext x='500' y='350' text-anchor='middle' font-family='sans-serif' font-size='32' fill='%231a254f'%3E${safe}%3C/text%3E%3C/svg%3E`;
+}
+
 export default function SitePage() {
   const { isPartner } = useUserRole();
   if (isPartner) return <PartnerSitePage />;
@@ -113,11 +162,9 @@ export default function SitePage() {
 }
 
 function WorkerSitePage() {
-  const { isAdmin } = useUserRole();
   const [sites, setSites] = useState<SiteData[]>(INITIAL_SITES);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<SiteStatus>("all");
-  const [onlyDirect, setOnlyDirect] = useState(false); // show only "직접등록" entries
   const [sort, setSort] = useState<SortType>("latest");
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [visibleCount, setVisibleCount] = useState(5);
@@ -131,6 +178,8 @@ function WorkerSitePage() {
   // Sheet state
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetSiteId, setSheetSiteId] = useState<number | null>(null);
+  const drawingInputRef = useRef<HTMLInputElement | null>(null);
+  const [drawingStore, setDrawingStore] = useState<SiteDrawingStore>(() => readSiteDrawingStore());
 
   // Search dropdown
   const [showDropdown, setShowDropdown] = useState(false);
@@ -195,6 +244,11 @@ function WorkerSitePage() {
     });
 
   const displayed = filtered.slice(0, visibleCount);
+  const sheetSite = useMemo(() => (sheetSiteId ? enrichedSites.find((s) => s.id === sheetSiteId) || null : null), [enrichedSites, sheetSiteId]);
+  const sheetSiteKey = useMemo(() => (sheetSite ? siteDrawingKey(sheetSite) : ""), [sheetSite]);
+  const sheetDrawings = useMemo(() => (sheetSiteKey ? (drawingStore[sheetSiteKey] || []) : []), [drawingStore, sheetSiteKey]);
+  const markedDrawings = useMemo(() => sheetDrawings.filter((d) => d.kind === "marked"), [sheetDrawings]);
+  const finalDrawings = useMemo(() => sheetDrawings.filter((d) => d.kind === "final"), [sheetDrawings]);
 
   const toggleExpand = (id: number) => {
     setExpandedIds(prev => {
@@ -242,6 +296,134 @@ function WorkerSitePage() {
     setViewerOpen(true);
     setSheetOpen(false);
   };
+
+  const updateSiteDrawings = useCallback((key: string, updater: (prev: SiteDrawingAsset[]) => SiteDrawingAsset[]) => {
+    setDrawingStore((prev) => {
+      const nextSiteItems = updater(prev[key] || []);
+      const nextStore = { ...prev, [key]: nextSiteItems };
+      writeSiteDrawingStore(nextStore);
+      return nextStore;
+    });
+  }, []);
+
+  const openDrawingAssetPreview = useCallback((asset: SiteDrawingAsset) => {
+    if (!sheetSite) return;
+    const kindLabel = asset.kind === "original" ? "공사도면(원본)" : asset.kind === "final" ? "완료도면(최종)" : "마킹도면";
+    setViewerTitle(`${sheetSite.name} · ${kindLabel}`);
+    setViewerContent(
+      <img
+        src={asset.url}
+        style={{ width: 850, height: "auto", display: "block" }}
+        alt={asset.name || "도면 미리보기"}
+      />
+    );
+    setViewerOpen(true);
+    setSheetOpen(false);
+  }, [sheetSite]);
+
+  const onDrawingUploadChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.currentTarget.value = "";
+    if (!sheetSite || !sheetSiteKey || files.length === 0) return;
+
+    try {
+      const urls = await Promise.all(files.map((f) => fileToDataUrl(f)));
+      const now = new Date().toISOString();
+      const assets: SiteDrawingAsset[] = urls.map((url, idx) => ({
+        id: `marked_${Date.now()}_${idx}`,
+        name: files[idx]?.name || `마킹도면 ${idx + 1}`,
+        url,
+        kind: "marked",
+        source: "upload",
+        createdAt: now,
+      }));
+      updateSiteDrawings(sheetSiteKey, (prev) => [...assets, ...prev]);
+      toast.success(`${assets.length}개 마킹도면을 저장했습니다.`);
+    } catch {
+      toast.error("도면 업로드에 실패했습니다.");
+    }
+  }, [sheetSite, sheetSiteKey, updateSiteDrawings]);
+
+  const loadLinkedOriginalDrawings = useCallback(() => {
+    if (!sheetSite || !sheetSiteKey) return;
+
+    const linked = sheetSite.siteDbId ? getDrawingsForSite(sheetSite.siteDbId) : [];
+    const now = new Date().toISOString();
+    let assets: SiteDrawingAsset[] = linked
+      .filter((d) => !!d.img)
+      .map((d, idx) => ({
+        id: `origin_${Date.now()}_${idx}`,
+        name: `공사도면 원본 ${idx + 1}`,
+        url: d.img,
+        kind: "original",
+        source: "linked",
+        createdAt: d.timestamp || now,
+      }));
+
+    if (assets.length === 0 && (sheetSite.drawings?.construction || []).length > 0) {
+      assets = (sheetSite.drawings.construction || []).map((d: any, idx: number) => ({
+        id: `origin_fallback_${Date.now()}_${idx}`,
+        name: d?.name || `공사도면 원본 ${idx + 1}`,
+        url: buildDrawingPlaceholder(d?.name || `공사도면 원본 ${idx + 1}`),
+        kind: "original",
+        source: "linked",
+        createdAt: now,
+      }));
+    }
+
+    if (assets.length === 0) {
+      toast.error("연동된 공사도면 원본이 없습니다.");
+      return;
+    }
+
+    updateSiteDrawings(sheetSiteKey, (prev) => {
+      const existingKeys = new Set(prev.map((p) => `${p.kind}:${p.url}`));
+      const merged = assets.filter((a) => !existingKeys.has(`${a.kind}:${a.url}`));
+      if (merged.length === 0) return prev;
+      return [...merged, ...prev];
+    });
+    toast.success(`연동 원본 도면 ${assets.length}개를 불러왔습니다.`);
+  }, [sheetSite, sheetSiteKey, updateSiteDrawings]);
+
+  const approveAsFinalDrawing = useCallback((asset: SiteDrawingAsset) => {
+    if (!sheetSite || !sheetSiteKey) return;
+    const approved: SiteDrawingAsset = {
+      ...asset,
+      id: `final_${Date.now()}`,
+      kind: "final",
+      source: "approved",
+      name: `${asset.name.replace(/\s*\(최종\)$/, "")} (최종)`,
+      createdAt: new Date().toISOString(),
+    };
+    updateSiteDrawings(sheetSiteKey, (prev) => [approved, ...prev]);
+    toast.success("최종 승인 완료도면으로 저장했습니다.");
+  }, [sheetSite, sheetSiteKey, updateSiteDrawings]);
+
+  const openCumulativeMarkedDrawings = useCallback(() => {
+    if (!sheetSite) return;
+    if (markedDrawings.length === 0) {
+      toast.error("저장된 마킹도면이 없습니다.");
+      return;
+    }
+    setViewerTitle(`${sheetSite.name} · 누적 마킹도면`);
+    setViewerContent(
+      <PhotoGrid
+        photos={markedDrawings.map((d) => ({ url: d.url, date: d.createdAt.slice(0, 10) }))}
+        siteName={sheetSite.name}
+      />
+    );
+    setViewerOpen(true);
+    setSheetOpen(false);
+  }, [markedDrawings, sheetSite]);
+
+  const openLatestFinalDrawing = useCallback(() => {
+    const latest = [...finalDrawings].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    if (!latest) {
+      toast.error("최종 승인된 완료도면이 없습니다.");
+      return;
+    }
+    openDrawingAssetPreview(latest);
+  }, [finalDrawings, openDrawingAssetPreview]);
 
   const openPhotoViewer = (site: typeof enrichedSites[0]) => {
     const samplePhotos = site.images.map(img => ({
@@ -437,21 +619,6 @@ function WorkerSitePage() {
             {f.label}
           </button>
         ))}
-
-        {/* direct-registration toggle (admin only) */}
-        {isAdmin && (
-          <button
-            onClick={() => { setOnlyDirect(d => !d); setVisibleCount(5); }}
-            className={cn(
-              "h-10 px-3.5 rounded-full text-sm-app font-medium whitespace-nowrap flex-shrink-0 border transition-all cursor-pointer flex items-center justify-center",
-              onlyDirect
-                ? "bg-red-500 text-white border-red-500 font-bold shadow-sm"
-                : "bg-card text-muted-foreground border-border hover:border-primary/50"
-            )}
-          >
-            직접등록만
-          </button>
-        )}
       </div>
 
       {/* Empty state */}
@@ -663,26 +830,102 @@ function WorkerSitePage() {
       {sheetOpen && (
         <div className="fixed inset-0 bg-black/50 z-[2000]" onClick={() => setSheetOpen(false)}>
           <div
-            className="fixed bottom-0 left-0 right-0 bg-card rounded-t-2xl p-6 z-[2100] max-w-[600px] mx-auto animate-slide-down"
+            className="absolute bottom-0 left-0 right-0 mx-auto w-full max-w-[600px] rounded-t-2xl bg-card p-4 shadow-2xl"
             onClick={e => e.stopPropagation()}
           >
-            <div className="text-center font-bold text-lg mb-5 text-foreground">도면 선택</div>
-            <button onClick={() => openA3Preview(`${sites.find(s => s.id === sheetSiteId)?.name} · 공사도면(조회)`)}
-              className="w-full h-[54px] bg-primary/5 text-primary border border-primary/30 rounded-xl font-bold flex items-center justify-center gap-2 mb-2.5 cursor-pointer hover:bg-primary/10 transition-colors">
-              <MapIcon className="w-[18px] h-[18px]" /> 공사 도면 (조회)
+            <div className="mb-3 flex items-center justify-between">
+              <div className="text-lg font-bold text-header-navy">도면 선택</div>
+              <button type="button" onClick={() => setSheetOpen(false)} className="rounded-lg p-1 text-muted-foreground hover:bg-accent">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <input ref={drawingInputRef} type="file" multiple accept="image/*" className="hidden" onChange={onDrawingUploadChange} />
+
+            <button
+              type="button"
+              onClick={() => drawingInputRef.current?.click()}
+              className="mb-2 flex h-[48px] w-full items-center justify-center gap-2 rounded-xl border border-dashed border-primary/35 bg-primary/10 text-[14px] font-bold text-primary hover:bg-primary/15"
+            >
+              <Upload className="h-4 w-4" /> 도면 업로드 (여러 페이지)
             </button>
-            <button onClick={() => toast("진행 도면 관리 (준비 중)")}
-              className="w-full h-[54px] bg-muted text-foreground border border-border rounded-xl font-bold flex items-center justify-center gap-2 mb-2.5 cursor-pointer hover:bg-background transition-colors">
-              진행 도면 (관리)
+
+            <button
+              type="button"
+              onClick={loadLinkedOriginalDrawings}
+              className="mb-3 flex h-[48px] w-full items-center justify-center gap-2 rounded-xl border border-border bg-bg-input text-[14px] font-bold text-foreground hover:bg-accent"
+            >
+              <MapIcon className="h-4 w-4" /> 연동 현장 도면 불러오기
             </button>
-            <button onClick={() => openA3Preview(`${sites.find(s => s.id === sheetSiteId)?.name} · 완료도면(확인)`)}
-              className="w-full h-[54px] bg-muted text-foreground border border-border rounded-xl font-bold flex items-center justify-center gap-2 mb-2.5 cursor-pointer hover:bg-background transition-colors">
-              완료 도면 (확인)
-            </button>
-            <button onClick={() => setSheetOpen(false)}
-              className="w-full h-[54px] bg-header-navy text-white rounded-xl font-bold mt-2 cursor-pointer hover:opacity-90 transition-opacity">
-              닫기
-            </button>
+
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={openCumulativeMarkedDrawings}
+                className="h-[40px] rounded-lg border border-sky-200 bg-sky-50 text-[12px] font-bold text-sky-700 hover:bg-sky-100"
+              >
+                누적 마킹도면 보기
+              </button>
+              <button
+                type="button"
+                onClick={openLatestFinalDrawing}
+                className="h-[40px] rounded-lg border border-emerald-200 bg-emerald-50 text-[12px] font-bold text-emerald-700 hover:bg-emerald-100"
+              >
+                최종 완료도면 보기
+              </button>
+            </div>
+
+            <div className="max-h-[54vh] overflow-y-auto">
+              {sheetDrawings.length === 0 ? (
+                <div className="rounded-xl border border-border bg-bg-input px-4 py-10 text-center text-sm text-muted-foreground">
+                  도면을 업로드하거나 연동 현장 도면을 불러오세요
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {sheetDrawings
+                    .slice()
+                    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+                    .map((asset) => (
+                      <div key={asset.id} className="rounded-xl border border-border bg-bg-input p-2.5">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={cn(
+                              "inline-flex h-5 shrink-0 items-center rounded-full px-2 text-[10px] font-bold",
+                              asset.kind === "original"
+                                ? "bg-blue-50 text-blue-700 border border-blue-200"
+                                : asset.kind === "final"
+                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                  : "bg-indigo-50 text-indigo-700 border border-indigo-200",
+                            )}
+                          >
+                            {asset.kind === "original" ? "원본" : asset.kind === "final" ? "최종" : "마킹"}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-[13px] font-semibold text-foreground">{asset.name}</div>
+                            <div className="text-[11px] text-muted-foreground">{asset.createdAt.slice(0, 10)}</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => openDrawingAssetPreview(asset)}
+                            className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-card px-2 text-[11px] font-bold text-text-sub hover:bg-muted"
+                          >
+                            <Eye className="h-3.5 w-3.5" /> 보기
+                          </button>
+                          {asset.kind !== "final" && (
+                            <button
+                              type="button"
+                              onClick={() => approveAsFinalDrawing(asset)}
+                              className="inline-flex h-7 items-center rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100"
+                            >
+                              최종승인
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -697,22 +940,40 @@ function WorkerSitePage() {
 
 function LodgeRow({ site, isOnline }: { site: SiteData; isOnline: boolean }) {
   const { lodge, canView, canEdit, isSaving, saveLodge } = useSiteLodging(site.siteDbId);
-  if (!canView) return null;
+  const canFallbackRender = !site.siteDbId;
+  if (!canView && !canFallbackRender) return null;
 
-  const lodgeValue = lodge || "";
+  const [localLodge, setLocalLodge] = useState(site.lodge || "");
+  useEffect(() => {
+    setLocalLodge(site.lodge || "");
+  }, [site.id, site.lodge]);
+
+  const canPersistEdit = canEdit && !!site.siteDbId;
+  const canEditInUi = canPersistEdit || canFallbackRender;
+  const lodgeValue = (lodge || localLodge || "").trim();
   const hasLodge = !!lodgeValue.trim();
+
+  const commitLodge = async (value: string) => {
+    const next = value.trim();
+    if (!next) return;
+    if (canPersistEdit) {
+      await saveLodge(next);
+      return;
+    }
+    setLocalLodge(next);
+  };
 
   const handleSearch = async () => {
     if (!isOnline) {
       toast.error("온라인에서 주소찾기가 가능합니다.");
       return;
     }
-    if (!canEdit || isSaving) return;
+    if (!canEditInUi || (canPersistEdit && isSaving)) return;
     try {
       const addr = await openDaumPostcode();
       if (!addr) return;
       try {
-        await saveLodge(addr);
+        await commitLodge(addr);
         toast.success("숙소 주소가 저장되었습니다.");
       } catch {
         // error toast handled in hook
@@ -724,44 +985,56 @@ function LodgeRow({ site, isOnline }: { site: SiteData; isOnline: boolean }) {
 
   return (
     <div className="flex justify-between items-center py-3 max-[640px]:py-2.5 border-b border-dashed border-border">
-      <span className="text-base-app text-text-sub font-bold w-20">숙소</span>
-      <div className="flex items-center gap-2 flex-1 justify-end">
-        <input
-          value={lodgeValue}
-          readOnly
-          placeholder={isOnline ? "주소 찾기" : "오프라인"}
+      <span className="text-base-app text-text-sub font-bold w-20 shrink-0 whitespace-nowrap">숙소</span>
+      <div className="flex items-center gap-1.5 max-[640px]:gap-1 flex-1 min-w-0 justify-end">
+        <button
+          type="button"
+          disabled={!hasLodge}
           onClick={() => hasLodge && openAddressInMaps(lodgeValue, { label: "숙소 주소" })}
           className={cn(
-            "text-base-app font-semibold text-foreground truncate pr-3 text-right bg-transparent border-none outline-none",
-            hasLodge && "cursor-pointer"
+            "flex-1 min-w-0 text-base-app font-semibold truncate pr-1 text-right bg-transparent border-none outline-none",
+            hasLodge ? "text-foreground cursor-pointer" : "text-muted-foreground cursor-default"
           )}
-          style={{ maxWidth: "60%" }}
-        />
-        <button
-          disabled={!hasLodge}
-          className={cn(
-            "w-9 h-9 max-[640px]:w-8 max-[640px]:h-8 rounded-[10px] flex items-center justify-center shrink-0 transition-all active:scale-95",
-            hasLodge
-              ? "bg-muted border border-border text-text-sub"
-              : "border border-dashed border-muted-foreground/40 text-muted-foreground bg-transparent opacity-60 cursor-not-allowed"
-          )}
-          onClick={() => copyText(lodgeValue, "숙소 주소")}
         >
-          <Copy className="w-[16px] h-[16px]" />
+          {hasLodge ? lodgeValue : "주소 찾기"}
         </button>
+
+        {hasLodge && (
+          <button
+            className="w-9 h-9 max-[640px]:w-8 max-[640px]:h-8 rounded-[10px] flex items-center justify-center shrink-0 transition-all active:scale-95 bg-muted border border-border text-text-sub"
+            onClick={() => copyText(lodgeValue, "숙소 주소")}
+          >
+            <Copy className="w-[16px] h-[16px]" />
+          </button>
+        )}
+
         <button
-          disabled={!isOnline || !canEdit || isSaving}
+          disabled={(!isOnline && !hasLodge) || !canEditInUi || (canPersistEdit && isSaving)}
           className={cn(
             "w-9 h-9 max-[640px]:w-8 max-[640px]:h-8 rounded-[10px] flex items-center justify-center shrink-0 transition-all active:scale-95",
             hasLodge ? "bg-[hsl(219_100%_95%)] border border-[hsl(219_100%_90%)] text-[hsl(230_60%_30%)]" : "border border-dashed border-primary text-primary bg-transparent",
-            (!isOnline || !canEdit || isSaving) && "opacity-50 cursor-not-allowed"
+            ((!isOnline && !hasLodge) || !canEditInUi || (canPersistEdit && isSaving)) && "opacity-50 cursor-not-allowed"
           )}
           onClick={() => hasLodge ? openAddressInMaps(lodgeValue, { label: "숙소 주소" }) : handleSearch()}
         >
           <MapPin className="w-[18px] h-[18px]" />
         </button>
+
+        {canEditInUi && (
+          <button
+            type="button"
+            disabled={canPersistEdit && isSaving}
+            onClick={handleSearch}
+            aria-label="숙소 주소 수정"
+            className={cn(
+              "w-9 h-9 max-[640px]:w-8 max-[640px]:h-8 rounded-[10px] flex items-center justify-center border",
+              (canPersistEdit && isSaving) ? "opacity-50 cursor-not-allowed border-border text-muted-foreground" : "border-border text-text-sub bg-muted"
+            )}
+          >
+            <Pencil className="w-4 h-4" />
+          </button>
+        )}
       </div>
     </div>
   );
 }
-

@@ -530,18 +530,18 @@ function WorkerOutputPage({ isAdmin }: { isAdmin: boolean }) {
           </div>
 
           {/* Summary */}
-          <div className="grid grid-cols-3 gap-2.5 mb-6">
-            <div className="p-4 rounded-2xl text-center flex flex-col gap-1.5 shadow-soft bg-[hsl(201_100%_94%)] text-[#0284c7] border border-[#0284c7]">
-              <span className="text-[24px] font-[800] leading-tight tracking-tight">{summaryStats.totalSites}</span>
-              <span className="text-[14px] font-bold opacity-90">현장수</span>
+          <div className="grid grid-cols-3 gap-2.5 mb-0">
+            <div className="p-3 rounded-2xl text-center flex flex-col gap-1 shadow-soft bg-[hsl(201_100%_94%)] text-[#0284c7] border border-[#0284c7]">
+              <span className="text-[22px] font-[800] leading-tight tracking-tight">{summaryStats.totalSites}</span>
+              <span className="text-[13px] font-bold opacity-90">현장수</span>
             </div>
-            <div className="p-4 rounded-2xl text-center flex flex-col gap-1.5 shadow-soft bg-[hsl(225_33%_95%)] text-[#1e3a8a] border border-[#1e3a8a]">
-              <span className="text-[24px] font-[800] leading-tight tracking-tight">{summaryStats.totalMan}</span>
-              <span className="text-[14px] font-bold opacity-90">공수</span>
+            <div className="p-3 rounded-2xl text-center flex flex-col gap-1 shadow-soft bg-[hsl(225_33%_95%)] text-[#1e3a8a] border border-[#1e3a8a]">
+              <span className="text-[22px] font-[800] leading-tight tracking-tight">{summaryStats.totalMan}</span>
+              <span className="text-[13px] font-bold opacity-90">공수</span>
             </div>
-            <div className="p-4 rounded-2xl text-center flex flex-col gap-1.5 shadow-soft bg-muted text-text-sub border border-text-sub">
-              <span className="text-[24px] font-[800] leading-tight tracking-tight">{summaryStats.workedDays}</span>
-              <span className="text-[14px] font-bold opacity-90">근무일</span>
+            <div className="p-3 rounded-2xl text-center flex flex-col gap-1 shadow-soft bg-muted text-text-sub border border-text-sub">
+              <span className="text-[22px] font-[800] leading-tight tracking-tight">{summaryStats.workedDays}</span>
+              <span className="text-[13px] font-bold opacity-90">근무일</span>
             </div>
           </div>
         </div>
@@ -1067,8 +1067,6 @@ function WorkerOutputPage({ isAdmin }: { isAdmin: boolean }) {
     </div>
   );
 }
-
-
 
 
 

@@ -51,6 +51,7 @@ export function useSiteLodging(siteId?: string | null) {
   const mutation = useMutation({
     mutationFn: async (value: string) => {
       if (!user || !siteId) throw new Error("권한이 없습니다.");
+      if (isPartner || !canEdit) throw new Error("권한이 없습니다.");
       const lodge_address = value.trim();
       if (!lodge_address) throw new Error("주소가 없습니다.");
       if (lodge_address.length > 200) throw new Error("주소가 너무 깁니다.");

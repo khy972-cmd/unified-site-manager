@@ -1,10 +1,11 @@
-import { useState, useMemo } from "react";
+﻿import { useState, useMemo } from "react";
 import { Search, X, Plus, MapPin, Users, ChevronDown, Edit2, Trash2, UserPlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import { useUserRole } from "@/hooks/useUserRole";
 
 interface SiteRow {
   id: string;
@@ -19,6 +20,7 @@ interface SiteRow {
 
 export default function AdminSiteManager() {
   const { user, isTestMode } = useAuth();
+  const { isAdmin } = useUserRole();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "진행중" | "예정" | "완료">("all");
@@ -58,8 +60,15 @@ export default function AdminSiteManager() {
     },
   });
 
+  const assertAdmin = () => {
+    if (isAdmin) return true;
+    toast.error("관리자 권한이 없습니다.");
+    return false;
+  };
+
   const createMutation = useMutation({
     mutationFn: async (site: { name: string; address: string; status: string; manager_name: string; manager_phone: string }) => {
+      if (!assertAdmin()) throw new Error("admin_only");
       const { error } = await supabase.from("sites").insert({ ...site, created_by: user?.id });
       if (error) throw error;
     },
@@ -74,6 +83,7 @@ export default function AdminSiteManager() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, ...data }: { id: string; name: string; address: string; status: string; manager_name: string; manager_phone: string }) => {
+      if (!assertAdmin()) throw new Error("admin_only");
       const { error } = await supabase.from("sites").update(data).eq("id", id);
       if (error) throw error;
     },
@@ -87,6 +97,7 @@ export default function AdminSiteManager() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
+      if (!assertAdmin()) throw new Error("admin_only");
       const { error } = await supabase.from("sites").delete().eq("id", id);
       if (error) throw error;
     },
@@ -137,7 +148,7 @@ export default function AdminSiteManager() {
           <p className="text-[15px] text-text-sub font-medium">현장 등록, 수정, 인원 배정</p>
         </div>
         <button
-          onClick={() => { resetForm(); setShowCreateModal(true); }}
+          onClick={() => { if (!assertAdmin()) return; resetForm(); setShowCreateModal(true); }}
           className="h-10 px-4 bg-primary text-primary-foreground rounded-xl font-bold text-[14px] flex items-center gap-1.5 cursor-pointer active:scale-[0.98]"
         >
           <Plus className="w-4 h-4" /> 현장등록
@@ -189,13 +200,13 @@ export default function AdminSiteManager() {
               <span className="flex items-center gap-1"><Users className="w-3.5 h-3.5" /> {site.memberCount}명</span>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => openEdit(site)} className="flex-1 h-9 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg font-bold text-[13px] flex items-center justify-center gap-1 cursor-pointer active:scale-[0.98]">
+              <button onClick={() => { if (!assertAdmin()) return; openEdit(site); }} className="flex-1 h-9 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg font-bold text-[13px] flex items-center justify-center gap-1 cursor-pointer active:scale-[0.98]">
                 <Edit2 className="w-3.5 h-3.5" /> 수정
               </button>
               <button onClick={() => setAssignSiteId(site.id)} className="flex-1 h-9 bg-violet-50 text-violet-600 border border-violet-200 rounded-lg font-bold text-[13px] flex items-center justify-center gap-1 cursor-pointer active:scale-[0.98]">
                 <UserPlus className="w-3.5 h-3.5" /> 인원배정
               </button>
-              <button onClick={() => { if (confirm("정말 삭제하시겠습니까?")) deleteMutation.mutate(site.id); }} className="h-9 px-3 bg-red-50 text-red-600 border border-red-200 rounded-lg cursor-pointer active:scale-[0.98]">
+              <button onClick={() => { if (!assertAdmin()) return; if (confirm("정말 삭제하시겠습니까?")) deleteMutation.mutate(site.id); }} className="h-9 px-3 bg-red-50 text-red-600 border border-red-200 rounded-lg cursor-pointer active:scale-[0.98]">
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -214,6 +225,7 @@ export default function AdminSiteManager() {
           phone={formPhone} setPhone={setFormPhone}
           onClose={() => { setShowCreateModal(false); setEditSite(null); resetForm(); }}
           onSubmit={() => {
+            if (!assertAdmin()) return;
             if (!formName.trim()) { toast.error("현장명을 입력하세요"); return; }
             if (editSite) {
               updateMutation.mutate({ id: editSite.id, name: formName, address: formAddr, status: formStatus, manager_name: formManager, manager_phone: formPhone });
