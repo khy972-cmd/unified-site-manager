@@ -1,36 +1,36 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
-import { ensureKakao, getKakaoConfig } from "@/lib/kakaoSdk";
+import { getKakaoConfig } from "@/lib/kakaoSdk";
 import { toast } from "sonner";
+import { useNavigate } from "react-router-dom";
 
 const OFFLINE_TOAST_MESSAGE = "\uC624\uD504\uB77C\uC778\uC5D0\uC11C\uB294 \uCE74\uCE74\uC624 \uBB38\uC758 \uBD88\uAC00(\uC5F0\uACB0 \uC2DC \uC0AC\uC6A9)";
 const DEFAULT_CHANNEL_URL = "https://pf.kakao.com/_xfgxdqX";
 const DEFAULT_CHAT_URL = "https://pf.kakao.com/_xfgxdqX/chat";
+const BRIDGE_ROUTE = "/request/external";
 const PAGE_TITLE = "\uBCF8\uC0AC\uC694\uCCAD";
 const PAGE_DESCRIPTION = "카카오톡으로 본사 문의 (오프라인 사용 불가)";
 const FOLLOW_BUTTON_LABEL = "\uCC44\uB110 \uCD94\uAC00(\uAC04\uD3B8)";
 const CHAT_BUTTON_LABEL = "1:1 \uCC44\uD305";
-const FOLLOW_SUCCESS_MESSAGE = "\uCC44\uB110 \uCD94\uAC00 \uC644\uB8CC";
-const FOLLOW_FAIL_MESSAGE = "\uCC44\uB110 \uCD94\uAC00\uAC00 \uCDE8\uC18C\uB418\uC5C8\uAC70\uB098 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4";
-const FOLLOW_ERROR_MESSAGE = "\uCC44\uB110 \uCD94\uAC00 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4";
-const CHAT_MOVE_MESSAGE = "\uCE74\uCE74\uC624\uD1A1\uC73C\uB85C \uC774\uB3D9\uD569\uB2C8\uB2E4";
-
-function openFallback(url: string) {
-  const popup = window.open(url, "_blank", "noopener,noreferrer");
-  if (!popup) {
-    window.location.href = url;
-  }
-}
 
 function getChatUrl(channelUrl?: string) {
   if (!channelUrl) return DEFAULT_CHAT_URL;
   return `${channelUrl.replace(/\/$/, "")}/chat`;
 }
 
+function buildBridgePath(targetUrl: string, title: string) {
+  const search = new URLSearchParams({
+    target: targetUrl,
+    title,
+  });
+  return `${BRIDGE_ROUTE}?${search.toString()}`;
+}
+
 export default function RequestPage() {
+  const navigate = useNavigate();
   const { isOnline } = useNetworkStatus();
-  const { channelPublicId, channelUrl } = getKakaoConfig();
+  const { channelUrl } = getKakaoConfig();
 
   const handleOfflineClick = () => {
     if (!isOnline) {
@@ -38,71 +38,26 @@ export default function RequestPage() {
     }
   };
 
-  const handleFollowChannel = async () => {
-    if (!isOnline) {
-      toast.warning(OFFLINE_TOAST_MESSAGE);
-      return;
-    }
-
-    const fallbackUrl = channelUrl || DEFAULT_CHANNEL_URL;
-    if (!channelPublicId) {
-      openFallback(fallbackUrl);
-      return;
-    }
-
-    const kakao = await ensureKakao();
-    if (!kakao) {
-      openFallback(fallbackUrl);
-      return;
-    }
-
-    try {
-      const response = await kakao.Channel.followChannel({ channelPublicId });
-
-      if (response?.status === "success") {
-        toast.success(FOLLOW_SUCCESS_MESSAGE);
-        return;
-      }
-
-      toast.error(FOLLOW_FAIL_MESSAGE);
-    } catch (error) {
-      const errorMsg =
-        typeof error === "object" &&
-        error !== null &&
-        "error_msg" in error &&
-        typeof (error as { error_msg?: unknown }).error_msg === "string"
-          ? (error as { error_msg: string }).error_msg
-          : FOLLOW_ERROR_MESSAGE;
-
-      toast.error(errorMsg);
-      openFallback(fallbackUrl);
-    }
+  const openKakaoBridge = (targetUrl: string, title: string) => {
+    navigate(buildBridgePath(targetUrl, title));
   };
 
-  const handleChat = async () => {
+  const handleFollowChannel = () => {
     if (!isOnline) {
       toast.warning(OFFLINE_TOAST_MESSAGE);
       return;
     }
 
-    const fallbackChatUrl = getChatUrl(channelUrl);
-    if (!channelPublicId) {
-      openFallback(fallbackChatUrl);
+    openKakaoBridge(channelUrl || DEFAULT_CHANNEL_URL, FOLLOW_BUTTON_LABEL);
+  };
+
+  const handleChat = () => {
+    if (!isOnline) {
+      toast.warning(OFFLINE_TOAST_MESSAGE);
       return;
     }
 
-    const kakao = await ensureKakao();
-    if (!kakao) {
-      openFallback(fallbackChatUrl);
-      return;
-    }
-
-    try {
-      kakao.Channel.chat({ channelPublicId });
-      toast.message(CHAT_MOVE_MESSAGE);
-    } catch {
-      openFallback(fallbackChatUrl);
-    }
+    openKakaoBridge(getChatUrl(channelUrl), CHAT_BUTTON_LABEL);
   };
 
   return (

@@ -11,6 +11,7 @@ import WorklogPage from "@/pages/WorklogPage";
 import OutputPage from "@/pages/OutputPage";
 import DocPage from "@/pages/DocPage";
 import RequestPage from "@/pages/RequestPage";
+import RequestExternalPage from "@/pages/RequestExternalPage";
 import AuthPage from "@/pages/AuthPage";
 import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import NotFound from "@/pages/NotFound";
@@ -38,6 +39,7 @@ const App = () => (
               <Route path="/output" element={<OutputPage />} />
               <Route path="/doc" element={<DocPage />} />
               <Route path="/request" element={<RequestPage />} />
+              <Route path="/request/external" element={<RequestExternalPage />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
