@@ -296,9 +296,12 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
   const [punchFilter, setPunchFilter] = useState<'all' | 'open' | 'done'>('all');
   const [siteFilter, setSiteFilter] = useState('');
   const [mediaSiteFilter, setMediaSiteFilter] = useState("all");
+  const [mediaSiteQuery, setMediaSiteQuery] = useState("전체 현장");
   const [showSiteDropdown, setShowSiteDropdown] = useState(false);
+  const [showMediaSiteDropdown, setShowMediaSiteDropdown] = useState(false);
   const [uploadSheetOpen, setUploadSheetOpen] = useState(false);
   const [batchBusy, setBatchBusy] = useState(false);
+  const [mediaSelectMode, setMediaSelectMode] = useState(false);
   const [previewModal, setPreviewModal] = useState<{ isOpen: boolean; file?: FilePreviewFile; title?: string }>({ isOpen: false });
   const [requiredDocOverrides, setRequiredDocOverrides] = useState<Partial<Record<RequiredDocKey, DocFile>>>({});
   const [requiredDocHiddenKeys, setRequiredDocHiddenKeys] = useState<Set<RequiredDocKey>>(new Set());
@@ -620,6 +623,12 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     return Array.from(new Set(rows.map((doc) => doc.title).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ko"));
   }, [docsByTab, isMediaArchiveTab, tabKey]);
 
+  const filteredMediaSiteOptions = useMemo(() => {
+    if (!isMediaArchiveTab) return [] as string[];
+    const query = mediaSiteQuery.trim() === "전체 현장" ? "" : mediaSiteQuery;
+    return mediaSiteOptions.filter((site) => matchKo(site, query));
+  }, [isMediaArchiveTab, mediaSiteOptions, mediaSiteQuery]);
+
   // Filtered docs (for non-punch tabs)
   const filteredDocs = useMemo(() => {
     if (isPunch) return [];
@@ -669,6 +678,14 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
   const displayedDocs = (!isPunch && !isBlueprint) ? filteredDocs.slice(0, visibleCount) : [];
   const displayedPunchGroups = isPunch ? filteredPunchGroups.slice(0, visibleCount) : [];
   const displayedBlueprintSites = isBlueprint ? filteredBlueprintSites.slice(0, visibleCount) : [];
+  const mediaSelectableDocs = useMemo(
+    () => (isMediaArchiveTab ? filteredDocs : []),
+    [filteredDocs, isMediaArchiveTab],
+  );
+  const mediaAllSelected = useMemo(
+    () => mediaSelectableDocs.length > 0 && mediaSelectableDocs.every((doc) => selectedIds.has(doc.id)),
+    [mediaSelectableDocs, selectedIds],
+  );
   const hasMore = isPunch
     ? filteredPunchGroups.length > visibleCount
     : isBlueprint
@@ -708,11 +725,36 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     setUploadSheetOpen(false);
   }, [isMediaArchiveTab, uploadSheetOpen]);
 
+  useEffect(() => {
+    if (isMediaArchiveTab) return;
+    setMediaSelectMode(false);
+  }, [isMediaArchiveTab]);
+
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleMediaSelectMode = () => {
+    setMediaSelectMode((prev) => {
+      if (prev) setSelectedIds(new Set());
+      return !prev;
+    });
+  };
+
+  const toggleSelectAllMedia = () => {
+    if (!isMediaArchiveTab) return;
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (mediaAllSelected) {
+        mediaSelectableDocs.forEach((doc) => next.delete(doc.id));
+      } else {
+        mediaSelectableDocs.forEach((doc) => next.add(doc.id));
+      }
       return next;
     });
   };
@@ -1601,45 +1643,65 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     return docs.flatMap(d =>
       (d.files || []).map(f => ({
         url: resolveFileUrl(f),
-        name: ensureExt(f.name || d.title, f.ext || ''),
+        name: (() => {
+          const base = ensureExt(f.name || d.title, f.ext || '');
+          if (!isMediaArchiveTab) return base;
+          const siteName = sanitizeDownloadName(d.title || "");
+          if (!siteName) return base;
+          return base.startsWith(`${siteName}_`) ? base : `${siteName}_${base}`;
+        })(),
       }))
     );
   };
 
+  const saveBatchFiles = async (files: BatchFile[]) => {
+    let saved = 0;
+    let skipped = 0;
+
+    for (const file of files) {
+      try {
+        const res = await fetch(file.url);
+        if (!res.ok) throw new Error("download_failed");
+        const blob = await res.blob();
+        downloadBlob(blob, file.name);
+        saved += 1;
+      } catch {
+        skipped += 1;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 180));
+    }
+
+    return { saved, skipped };
+  };
+
   const handleBatchDownload = async () => {
-    const files = collectSelectedFiles().filter(f => !!f.url);
+    const files = collectSelectedFiles().filter((f) => !!f.url);
     if (files.length === 0) {
-      toast.error('저장할 파일이 없습니다.');
+      toast.error("저장할 파일이 없습니다.");
       return;
     }
 
     setBatchBusy(true);
     try {
-      for (const f of files) {
-        const res = await fetch(f.url);
-        if (!res.ok) throw new Error('download_failed');
-        const blob = await res.blob();
-        downloadBlob(blob, f.name);
-        // Avoid browsers blocking multiple auto-downloads too aggressively.
-        await new Promise(r => setTimeout(r, 200));
-      }
-      toast.success(files.length === 1 ? '저장했습니다.' : `${files.length}개 파일을 저장했습니다.`);
-    } catch {
-      toast.error('파일 저장에 실패했습니다.');
+      const { saved, skipped } = await saveBatchFiles(files);
+      if (saved > 0) toast.success(saved === 1 ? "1개 저장 완료" : `${saved}개 저장 완료`);
+      if (skipped > 0) toast.error(`${skipped}개 파일은 건너뛰었습니다.`);
+      if (saved === 0) toast.error("파일 저장에 실패했습니다.");
     } finally {
       setBatchBusy(false);
     }
   };
 
   const handleBatchShare = async () => {
-    const files = collectSelectedFiles().filter(f => !!f.url);
+    const files = collectSelectedFiles().filter((f) => !!f.url);
     if (files.length === 0) {
-      toast.error('공유할 파일이 없습니다.');
+      toast.error("공유할 파일이 없습니다.");
       return;
     }
 
     if (!navigator.share) {
-      toast.error('이 기기는 공유 기능을 지원하지 않습니다. (저장을 이용해주세요)');
+      toast("공유 미지원 환경입니다. 저장으로 전환합니다");
+      await handleBatchDownload();
       return;
     }
 
@@ -1649,21 +1711,37 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     setBatchBusy(true);
     try {
       const shareFiles: File[] = [];
-      for (const f of targets) {
-        const res = await fetch(f.url);
-        if (!res.ok) throw new Error('share_fetch_failed');
-        const blob = await res.blob();
-        shareFiles.push(new File([blob], f.name, { type: blob.type || guessMimeFromName(f.name) }));
+      let skipped = 0;
+
+      for (const file of targets) {
+        try {
+          const res = await fetch(file.url);
+          if (!res.ok) throw new Error("share_fetch_failed");
+          const blob = await res.blob();
+          shareFiles.push(new File([blob], file.name, { type: blob.type || guessMimeFromName(file.name) }));
+        } catch {
+          skipped += 1;
+        }
+      }
+
+      if (shareFiles.length === 0) {
+        toast.error("공유할 파일을 준비하지 못했습니다.");
+        if (skipped > 0) toast.error(`${skipped}개 파일은 건너뛰었습니다.`);
+        return;
       }
 
       if (navigator.canShare?.({ files: shareFiles })) {
-        await navigator.share({ title: '문서 공유', files: shareFiles });
-        toast.success('공유했습니다.');
+        toast.success(`${shareFiles.length}개 공유 준비`);
+        await navigator.share({ title: "문서 공유", files: shareFiles });
+        if (skipped > 0) toast.error(`${skipped}개 파일은 건너뛰었습니다.`);
       } else {
-        toast.error('이 기기는 파일 공유를 지원하지 않습니다. (저장을 이용해주세요)');
+        toast("공유 미지원 환경입니다. 저장으로 전환합니다");
+        const { saved, skipped: savedSkipped } = await saveBatchFiles(files);
+        if (saved > 0) toast.success(saved === 1 ? "1개 저장 완료" : `${saved}개 저장 완료`);
+        if (savedSkipped > 0) toast.error(`${savedSkipped}개 파일은 건너뛰었습니다.`);
       }
     } catch (e) {
-      if (!isAbortError(e)) toast.error('공유에 실패했습니다.');
+      if (!isAbortError(e)) toast.error("공유에 실패했습니다.");
     } finally {
       setBatchBusy(false);
     }
@@ -1679,8 +1757,11 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     setSiteFilter('');
     setDetailGroupId(null);
     setMediaSiteFilter("all");
+    setMediaSiteQuery("전체 현장");
     setShowSiteDropdown(false);
+    setShowMediaSiteDropdown(false);
     setUploadSheetOpen(false);
+    setMediaSelectMode(false);
     setSelectedFiles([]);
     // PATCH START: reset upload autocomplete state
     setUploadSiteQuery("");
@@ -2131,12 +2212,12 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
 
       
       {/* Search */}
-      {!detailGroupId && DOC_TABS_FILTERED[activeTab] !== "조치" && (
+      {!detailGroupId && DOC_TABS_FILTERED[activeTab] !== "조치" && !isMediaArchiveTab && (
         <div className="relative mb-4">
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder={["도면함", "사진함"].includes(DOC_TABS_FILTERED[activeTab]) ? "현장명을 입력하세요." : "검색어를 입력하세요."}
+            placeholder="검색어를 입력하세요."
             className="w-full h-[50px] bg-card border border-border rounded-2xl px-5 pr-12 text-base font-medium text-foreground placeholder:text-muted-foreground transition-all hover:bg-card hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)] outline-none"
           />
           {search && (
@@ -2157,22 +2238,99 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
       )}
 
       {!detailGroupId && isMediaArchiveTab && (
-        <div className="mb-4 grid grid-cols-2 gap-2">
-          <select
-            value={mediaSiteFilter}
-            onChange={(e) => setMediaSiteFilter(e.target.value)}
-            className="h-[46px] rounded-xl border border-border bg-card px-3 text-[14px] font-semibold text-foreground outline-none transition-all hover:border-primary/50 focus:border-primary"
+        <div className="relative mb-4">
+          <input
+            value={mediaSiteQuery}
+            onChange={(e) => {
+              setMediaSiteQuery(e.target.value);
+              setShowMediaSiteDropdown(true);
+            }}
+            onFocus={() => setShowMediaSiteDropdown(true)}
+            placeholder="현장 선택 또는 검색"
+            className="w-full h-[50px] bg-card border border-border rounded-2xl px-5 pr-16 text-base font-medium text-foreground placeholder:text-muted-foreground transition-all hover:bg-card hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)] outline-none"
+          />
+          {mediaSiteQuery && (
+            <button
+              onClick={() => {
+                setMediaSiteQuery("전체 현장");
+                setMediaSiteFilter("all");
+                setShowMediaSiteDropdown(false);
+              }}
+              className="absolute right-12 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[12px] text-muted-foreground z-10"
+            >
+              ✕
+            </button>
+          )}
+          <button
+            onClick={() => setShowMediaSiteDropdown((prev) => !prev)}
+            className="absolute right-4 top-1/2 -translate-y-1/2"
           >
-            <option value="all">전체 현장</option>
-            {mediaSiteOptions.map((site) => (
-              <option key={site} value={site}>
-                {site}
-              </option>
-            ))}
-          </select>
-          <div className="h-[46px] rounded-xl border border-border bg-muted/40 px-3 text-[13px] font-semibold text-text-sub flex items-center justify-center">
-            자동 집계 {filteredDocs.length}건
+            <ChevronDown className="w-5 h-5 text-muted-foreground" />
+          </button>
+          {showMediaSiteDropdown && (
+            <ul className="absolute z-50 w-full mt-1.5 max-h-60 overflow-auto bg-card border border-border rounded-xl shadow-lg">
+              <li
+                onClick={() => {
+                  setMediaSiteFilter("all");
+                  setMediaSiteQuery("전체 현장");
+                  setShowMediaSiteDropdown(false);
+                }}
+                className="px-4 py-3.5 cursor-pointer border-b border-border text-[15px] font-medium text-foreground hover:bg-muted"
+              >
+                전체 현장
+              </li>
+              {filteredMediaSiteOptions.length === 0 ? (
+                <li className="px-4 py-3.5 text-[14px] text-muted-foreground">검색 결과가 없습니다.</li>
+              ) : (
+                filteredMediaSiteOptions.map((site) => (
+                  <li
+                    key={site}
+                    onClick={() => {
+                      setMediaSiteFilter(site);
+                      setMediaSiteQuery(site);
+                      setShowMediaSiteDropdown(false);
+                    }}
+                    className="px-4 py-3.5 cursor-pointer border-b border-border last:border-0 text-[15px] font-medium text-foreground hover:bg-muted"
+                  >
+                    {site}
+                  </li>
+                ))
+              )}
+            </ul>
+          )}
+        </div>
+      )}
+      {!detailGroupId && isMediaArchiveTab && (
+        <div className="mb-3 rounded-xl border border-border bg-card px-3 py-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={toggleMediaSelectMode}
+              className={cn(
+                "h-9 rounded-full border px-3 text-[13px] font-bold inline-flex items-center gap-1.5 transition-all",
+                mediaSelectMode
+                  ? "border-primary bg-primary-bg text-primary"
+                  : "border-border bg-background text-text-sub hover:border-primary/50",
+              )}
+            >
+              <Check className="h-4 w-4" />
+              {mediaSelectMode ? "선택 해제" : "선택"}
+            </button>
+            {mediaSelectMode && (
+              <button
+                type="button"
+                onClick={toggleSelectAllMedia}
+                className="h-9 rounded-full border border-border bg-background px-3 text-[13px] font-semibold text-text-sub hover:border-primary/50"
+              >
+                {mediaAllSelected ? "전체해제" : "전체선택"}
+              </button>
+            )}
           </div>
+          {mediaSelectMode && (
+            <p className="mt-2 truncate text-[12px] font-semibold text-text-sub">
+              파일을 선택한 뒤 저장 또는 공유하세요. ({selectedIds.size}개 선택)
+            </p>
+          )}
         </div>
       )}
 
@@ -2397,12 +2555,21 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                 )
               ) : displayedDocs.map(doc => {
                 const isSelected = selectedIds.has(doc.id);
-                const canSelect = !isMediaArchiveTab;
+                const canSelect = !isMediaArchiveTab || mediaSelectMode;
                 const primaryFile = doc.files?.[0];
                 const hasFile = !!primaryFile && !!resolveFileUrl(primaryFile);
                 const repImg = doc.files?.find(f => f.type === 'img');
                 const thumbUrl = repImg ? ((repImg.currentView === 'after' ? repImg.url_after : repImg.url_before) || repImg.url) : null;
                 const linkedWorklogId = extractWorklogId(doc.id);
+                const mediaCount = doc.files?.length || 0;
+                const displayFileName = (() => {
+                  const baseName = primaryFile?.name || doc.title;
+                  if (!isMediaArchiveTab || !primaryFile) return baseName;
+                  const siteName = (doc.title || "").trim();
+                  if (!siteName) return baseName;
+                  if (baseName.startsWith(`${siteName}_`)) return baseName;
+                  return `${siteName}_${baseName}`;
+                })();
 
                 return (
                   <div
@@ -2415,10 +2582,15 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                       if (primaryFile) openDocPreview(doc, primaryFile);
                     }}
                     className={cn(
-                      "bg-card rounded-2xl p-3.5 max-[640px]:p-3 cursor-pointer transition-all shadow-soft flex gap-2.5 max-[640px]:gap-2 items-center",
+                      "relative bg-card rounded-2xl p-3.5 max-[640px]:p-3 cursor-pointer transition-all shadow-soft flex gap-2.5 max-[640px]:gap-2 items-center",
                       canSelect && isSelected && "border-2 border-primary bg-sky-50/50 shadow-[0_0_0_2px_rgba(49,163,250,0.1)]",
                     )}
                   >
+                    {isMediaArchiveTab && (
+                      <div className="absolute right-3 top-3 h-[24px] rounded-lg border border-border bg-muted/40 px-2 text-[11px] font-semibold text-text-sub flex items-center justify-center">
+                        자동 집계 {mediaCount}건
+                      </div>
+                    )}
                     {canSelect && (
                       <div className={cn("w-[20px] h-[20px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all", isSelected ? "bg-sky-500 border-sky-500 shadow-[0_2px_8px_rgba(14,165,233,0.3)]" : "bg-card border-muted-foreground/30")}>
                         {isSelected && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
@@ -2443,12 +2615,12 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                       {doc.contractor ? (
                         <div className="flex items-center gap-1.5">
                           <MapPin className="w-4 h-4 text-text-sub shrink-0" />
-                          <div className="text-[16px] font-[800] text-header-navy truncate flex-1 leading-tight">{primaryFile?.name || doc.title}</div>
+                          <div className="text-[16px] font-[800] text-header-navy truncate flex-1 leading-tight">{displayFileName}</div>
                         </div>
                       ) : (
                         <div className="flex items-center gap-1.5">
                           {tabKey !== "회사서류" && <FileText className="w-4 h-4 text-text-sub shrink-0" />}
-                          <div className="text-[16px] font-[800] text-header-navy truncate flex-1 leading-tight">{primaryFile?.name || doc.title}</div>
+                          <div className="text-[16px] font-[800] text-header-navy truncate flex-1 leading-tight">{displayFileName}</div>
                         </div>
                       )}
 
@@ -2673,6 +2845,35 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
               <Trash2 className="w-4 h-4 transition-transform duration-200 group-hover:scale-110" strokeWidth={2.5} />
               삭제
             </button>
+          </div>
+        </div>
+      )}
+      {selectedIds.size > 0 && !detailGroupId && isMediaArchiveTab && mediaSelectMode && (
+        <div className="fixed bottom-[calc(65px+14px+env(safe-area-inset-bottom,0px))] left-1/2 -translate-x-1/2 z-[5000] w-[calc(100%-32px)] max-w-[420px] animate-fade-in">
+          <div className="bg-card rounded-xl border border-gray-200 px-2 py-2">
+            <p className="mb-2 truncate px-1 text-[12px] font-semibold text-text-sub">
+              파일을 선택한 뒤 저장 또는 공유하세요 ({selectedIds.size}개)
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={handleBatchDownload}
+                disabled={batchBusy}
+                className="h-[44px] rounded-lg bg-header-navy text-[14px] font-bold text-white transition-all duration-200 hover:bg-header-navy/90 hover:shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <Download className="w-4 h-4" />
+                저장
+              </button>
+              <button
+                type="button"
+                onClick={handleBatchShare}
+                disabled={batchBusy}
+                className="h-[44px] rounded-lg bg-header-navy text-[14px] font-bold text-white transition-all duration-200 hover:bg-header-navy/90 hover:shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <Share2 className="w-4 h-4" />
+                공유
+              </button>
+            </div>
           </div>
         </div>
       )}
