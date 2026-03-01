@@ -2022,7 +2022,7 @@ function WorkerWorklogPage() {
 
   return (
     <div className="animate-fade-in pb-[calc(env(safe-area-inset-bottom)+104px)]">
-      <section className="sticky top-0 z-30 border-b border-border bg-background/95 px-0 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85">
+      <section className="sticky top-0 z-30 bg-background/95 px-0 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85">
         <div className="space-y-2">
           <div className="relative">
             {isSiteSearchCompact && hasSiteName ? (
@@ -2181,7 +2181,13 @@ function WorkerWorklogPage() {
                   className={cn(
                     "h-10 px-3.5 rounded-full whitespace-nowrap flex-shrink-0 border transition-all cursor-pointer flex items-center justify-center",
                     siteCardFilter === chip.key
-                      ? "bg-primary text-white border-primary font-bold shadow-sm"
+                      ? chip.key === "all"
+                        ? "bg-primary text-white border-primary font-bold shadow-sm"
+                        : chip.key === "pending"
+                          ? "bg-indigo-500 text-white border-indigo-500 font-bold shadow-sm"
+                          : chip.key === "rejected"
+                            ? "bg-red-500 text-white border-red-500 font-bold shadow-sm"
+                            : "bg-muted-foreground text-white border-muted-foreground font-bold shadow-sm"
                       : "bg-card text-muted-foreground border-border hover:border-primary/50 font-medium",
                   )}
                 >
