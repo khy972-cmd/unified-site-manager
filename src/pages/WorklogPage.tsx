@@ -79,7 +79,7 @@ const MEMO_AUTOSAVE_KEY = "inopnc_worklog_memo_autosave_v1";
 type SheetType = "manpower" | "work" | "material" | "media" | null;
 type SaveIntent = "draft" | "pending";
 type WorklogTab = "write" | "view";
-type GalleryKind = AttachmentType | null;
+type GalleryKind = AttachmentType | "receipt" | null;
 type LegacyMedia = AttachmentRef & { url?: string };
 type SiteCardFilter = "all" | "pending" | "rejected" | "approved";
 
@@ -635,10 +635,10 @@ function formatDateTimeLabel(value: string) {
 }
 
 function siteCardActionHint(status: WorklogStatus) {
-  if (status === "pending") return "승인 대기중 · 카드 열기 후 요청취소 또는 결과 확인";
-  if (status === "rejected") return "반려됨 · 카드 열기 후 반려 날짜부터 수정";
-  if (status === "approved") return "완료 · 변경 필요 시 날짜 선택 후 수정 저장";
-  return "작성중 · 카드 열기 후 필요한 날짜만 수정";
+  if (status === "pending") return "승인 대기중 · 요청취소 또는 결과 확인";
+  if (status === "rejected") return "반려됨 · 반려 날짜부터 수정";
+  if (status === "approved") return "완료 · 변경 시 날짜 선택 후 수정";
+  return "작성중 · 필요한 날짜만 수정";
 }
 function buildMemoStorageKey(siteValue: string, siteName: string, date: string) {
   return `${siteKey(siteValue, siteName)}|${date}`;
@@ -1217,6 +1217,21 @@ function WorkerWorklogPage() {
     });
     return list;
   }, [dailyRows, form.siteName]);
+  const siteReceiptRows = useMemo(() => {
+    const list: SiteMediaRow[] = [];
+    dailyRows.forEach((row) => {
+      getReceiptItems(getRowPhotos(row)).forEach((item, index) => {
+        list.push({
+          key: `site_receipt_${row.date}_${mediaItemKey(item, index)}`,
+          date: row.date,
+          type: "photo",
+          item,
+          title: `${form.siteName || row.date} 확인서 ${index + 1}`,
+        });
+      });
+    });
+    return list;
+  }, [dailyRows, form.siteName]);
 
   const photoGroups = useMemo(() => {
     const map = new Map<string, SiteMediaRow[]>();
@@ -1239,6 +1254,16 @@ function WorkerWorklogPage() {
       .sort((a, b) => b[0].localeCompare(a[0]))
       .map(([date, items]) => ({ date, items }));
   }, [siteDrawingRows]);
+  const receiptGroups = useMemo(() => {
+    const map = new Map<string, SiteMediaRow[]>();
+    siteReceiptRows.forEach((row) => {
+      if (!map.has(row.date)) map.set(row.date, []);
+      map.get(row.date)!.push(row);
+    });
+    return [...map.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([date, items]) => ({ date, items }));
+  }, [siteReceiptRows]);
 
   const formMediaEntries = useMemo(
     () => [
@@ -1253,8 +1278,9 @@ function WorkerWorklogPage() {
       ...formMediaEntries,
       ...sitePhotoRows.map((row) => ({ key: row.key, item: row.item })),
       ...siteDrawingRows.map((row) => ({ key: row.key, item: row.item })),
+      ...siteReceiptRows.map((row) => ({ key: row.key, item: row.item })),
     ],
-    [formMediaEntries, sitePhotoRows, siteDrawingRows],
+    [formMediaEntries, sitePhotoRows, siteDrawingRows, siteReceiptRows],
   );
 
   useEffect(() => {
@@ -2011,6 +2037,13 @@ function WorkerWorklogPage() {
     setMaterialQty("");
     if (isMaterialDirect) setCustomMaterialValue("");
   };
+  const galleryTitle =
+    galleryKind === "photo"
+      ? `사진함 전체 (${sitePhotoRows.length})`
+      : galleryKind === "drawing"
+        ? `도면함 전체 (${siteDrawingRows.length})`
+        : `확인서함 전체 (${siteReceiptRows.length})`;
+  const galleryGroups = galleryKind === "photo" ? photoGroups : galleryKind === "drawing" ? drawingGroups : receiptGroups;
 
   if (isLoading) {
     return (
@@ -2217,7 +2250,7 @@ function WorkerWorklogPage() {
                 </span>
                 <p className="truncate pr-14 text-[19px] font-[800] leading-snug text-header-navy">{card.siteName}</p>
                 <p className="mt-0.5 text-tiny font-semibold text-text-sub">
-                  최근 업데이트 {formatDateTimeLabel(card.lastUpdatedAt)} · 포함 날짜 {card.dateCount}건 · 통합 v{card.latestVersion || 1}
+                  최근 {formatDateTimeLabel(card.lastUpdatedAt)} · 포함 날짜 {card.dateCount}건 · 통합 v{card.latestVersion || 1}
                 </p>
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
                   <span className="inline-flex h-6 items-center rounded-lg border border-sky-200 bg-sky-50 px-2 text-[12px] font-semibold text-sky-700">
@@ -2253,7 +2286,7 @@ function WorkerWorklogPage() {
                   {form.siteName || "현장을 선택하세요"}
                 </p>
                 <p className="mt-0.5 text-tiny font-semibold text-text-sub">
-                  최근 업데이트 {formatDateTimeLabel(siteUnitUpdatedAt)} · 포함 날짜 {includedDates.length}건 · 통합 v{siteUnitVersion || 1}
+                  최근 {formatDateTimeLabel(siteUnitUpdatedAt)} · 포함 날짜 {includedDates.length}건 · 통합 v{siteUnitVersion || 1}
                 </p>
                 <div className="mt-1 flex items-center gap-1.5">
                   <span className="inline-flex h-6 items-center rounded-lg border border-sky-200 bg-sky-50 px-2 text-[12px] font-semibold text-sky-700">
@@ -2274,20 +2307,37 @@ function WorkerWorklogPage() {
             <section
               className={cn(
                 "rounded-2xl border px-4 py-2.5",
-                siteReadyToSubmit ? "border-rose-200 bg-rose-50" : "border-rose-200 bg-rose-50",
+                isPendingSite
+                  ? "border-indigo-200 bg-indigo-50"
+                  : siteReadyToSubmit
+                    ? "border-emerald-200 bg-emerald-50"
+                    : "border-rose-200 bg-rose-50",
               )}
             >
               <div className="flex items-center gap-2.5">
                 <div
                   className={cn(
                     "inline-flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full border bg-white",
-                    siteReadyToSubmit ? "border-rose-300 text-rose-600" : "border-rose-300 text-rose-600",
+                    isPendingSite
+                      ? "border-indigo-300 text-indigo-600"
+                      : siteReadyToSubmit
+                        ? "border-emerald-300 text-emerald-600"
+                        : "border-rose-300 text-rose-600",
                   )}
                 >
-                  {siteReadyToSubmit ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
+                  {(isPendingSite || siteReadyToSubmit) ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
                 </div>
-                <div className="min-w-0 truncate whitespace-nowrap text-[13px] font-semibold leading-none text-rose-800">
-                  {siteReadyToSubmit ? "통합승인요청 가능" : `필수: ${sitePendingInline}`}
+                <div
+                  className={cn(
+                    "min-w-0 truncate whitespace-nowrap text-[13px] font-semibold leading-none",
+                    isPendingSite ? "text-indigo-800" : siteReadyToSubmit ? "text-emerald-800" : "text-rose-800",
+                  )}
+                >
+                  {isPendingSite
+                    ? "입력 단계 안내: 승인대기중 · 하단 통합요청 취소 후 수정"
+                    : siteReadyToSubmit
+                      ? "입력 단계 안내: 완료 · 하단 통합승인요청"
+                      : `입력 단계 안내: ${sitePendingInline} 입력`}
                 </div>
               </div>
             </section>
@@ -2389,7 +2439,7 @@ function WorkerWorklogPage() {
 
               <SummaryCard
                 icon={<Camera className="w-5 h-5 text-header-navy" />}
-                title="사진 · 도면"
+                title="사진 · 도면 · 확인서"
                 summary={mediaSummary}
                 onClick={() => openSheetWithGuard("media")}
                 required
@@ -2480,7 +2530,7 @@ function WorkerWorklogPage() {
                         {expanded && (
                           <div className="mt-2 rounded-lg border border-border bg-card px-3 py-2.5">
                             <p className="text-tiny font-medium text-text-sub">
-                              날짜 섹션 내용을 수정하려면 아래 버튼으로 작성 탭에서 해당 날짜를 불러오세요.
+                              날짜 수정은 아래 버튼으로 바로 불러오세요.
                             </p>
                             <div className="mt-2 flex items-center justify-end">
                               <button
@@ -2605,6 +2655,59 @@ function WorkerWorklogPage() {
                 </div>
               )}
             </section>
+
+            <section className="rounded-2xl border border-border bg-card px-4 py-4 shadow-soft">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-base-app font-bold text-header-navy">확인서함 (누적 {siteReceiptRows.length}건)</p>
+                <button
+                  type="button"
+                  onClick={() => setGalleryKind("receipt")}
+                  className="h-8 rounded-full border border-border bg-background px-3 text-tiny font-semibold text-text-sub hover:bg-muted"
+                >
+                  전체보기
+                </button>
+              </div>
+
+              {receiptGroups.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border bg-background px-3 py-8 text-center text-sm-app font-medium text-text-sub">
+                  자료가 없습니다.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {receiptGroups.slice(0, 4).map((group) => (
+                    <div key={`receipt_group_${group.date}`} className="rounded-xl border border-border bg-background px-2.5 py-2.5">
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <p className="text-tiny font-semibold text-header-navy">{group.date}</p>
+                        <button type="button" onClick={() => moveToDate(group.date)} className="text-[11px] font-semibold text-primary">
+                          해당 일지 이동
+                        </button>
+                      </div>
+                      <div className="flex gap-2 overflow-x-auto no-scrollbar pb-0.5">
+                        {group.items.map((row) => {
+                          const url = previewMap[row.key];
+                          return (
+                            <button
+                              key={row.key}
+                              type="button"
+                              onClick={() => openMediaViewer(row.item, row.title)}
+                              className="h-[84px] w-[84px] shrink-0 overflow-hidden rounded-lg border border-border bg-muted"
+                            >
+                              {url ? (
+                                <img src={url} alt={row.title} className="h-full w-full object-cover" />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                  <ImageIcon className="h-5 w-5" />
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
           </>
         )}
       </div>
@@ -2689,20 +2792,18 @@ function WorkerWorklogPage() {
       <Drawer open={galleryKind !== null} onOpenChange={(open) => !open && setGalleryKind(null)}>
         <DrawerContent className="mx-auto max-w-[600px] rounded-t-2xl border-t border-border bg-white">
           <DrawerHeader className="flex flex-row items-center justify-between">
-            <DrawerTitle className="text-base-app font-bold">
-              {galleryKind === "photo" ? `사진함 전체 (${sitePhotoRows.length})` : `도면함 전체 (${siteDrawingRows.length})`}
-            </DrawerTitle>
+            <DrawerTitle className="text-base-app font-bold">{galleryTitle}</DrawerTitle>
             <button type="button" onClick={() => setGalleryKind(null)} className="h-8 w-8 rounded-lg border border-border text-muted-foreground">
               <X className="h-4 w-4 mx-auto" />
             </button>
           </DrawerHeader>
           <div className="px-4 pb-6 max-h-[72dvh] overflow-y-auto space-y-3">
-            {(galleryKind === "photo" ? photoGroups : drawingGroups).length === 0 ? (
+            {galleryGroups.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border bg-background px-3 py-8 text-center text-sm-app font-semibold text-text-sub">
                 자료가 없습니다.
               </div>
             ) : (
-              (galleryKind === "photo" ? photoGroups : drawingGroups).map((group) => (
+              galleryGroups.map((group) => (
                 <div key={`gallery_${galleryKind}_${group.date}`} className="rounded-xl border border-border bg-background p-2.5">
                   <div className="mb-2 flex items-center justify-between">
                     <p className="text-tiny font-semibold text-header-navy">{group.date}</p>
@@ -3220,7 +3321,7 @@ function WorkerWorklogPage() {
           {sheet === "media" && (
             <>
               <DrawerHeader className="flex flex-row items-center justify-between">
-                <DrawerTitle className="text-base-app font-bold">사진 · 도면</DrawerTitle>
+                <DrawerTitle className="text-base-app font-bold">사진 · 도면 · 확인서</DrawerTitle>
                 <button type="button" onClick={() => setSheet(null)} className="h-8 w-8 rounded-lg border border-border text-muted-foreground">
                   <X className="h-4 w-4 mx-auto" />
                 </button>
