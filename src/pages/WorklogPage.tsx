@@ -991,42 +991,6 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
     mediaRequiredCount === 0 ? "사진 또는 도면 1건 이상" : "",
   ].filter(Boolean);
   const pendingInline = pendingItems.map(compactPendingLabel).join(" · ");
-  const siteManpowerValidCount = useMemo(
-    () =>
-      dailyRows.reduce(
-        (sum, row) => sum + row.manpower.filter((item) => item.worker.trim() && Number(item.workHours || 0) > 0).length,
-        0,
-      ),
-    [dailyRows],
-  );
-  const siteWorkValidCount = useMemo(
-    () =>
-      dailyRows.reduce(
-        (sum, row) =>
-          sum +
-          row.workSets.filter((item) => resolvedValue(item.member || "", item.customMemberValue || "") && resolvedValue(item.process || "", item.customProcessValue || "")).length,
-        0,
-      ),
-    [dailyRows],
-  );
-  const sitePhotoValidCount = useMemo(
-    () => dailyRows.reduce((sum, row) => sum + rowPhotoCount(row), 0),
-    [dailyRows],
-  );
-  const siteDrawingValidCount = useMemo(
-    () => dailyRows.reduce((sum, row) => sum + getRowDrawings(row).length, 0),
-    [dailyRows],
-  );
-  const siteMediaValidCount = sitePhotoValidCount + siteDrawingValidCount;
-  const siteReadyToSubmit = hasSiteName && siteManpowerValidCount > 0 && siteWorkValidCount > 0 && siteMediaValidCount > 0;
-  const sitePendingInline = [
-    !hasSiteName ? "현장" : "",
-    siteManpowerValidCount === 0 ? "투입" : "",
-    siteWorkValidCount === 0 ? "작업" : "",
-    siteMediaValidCount === 0 ? "사진/도면" : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
 
   const manpowerSummary =
     manpowerValidCount > 0
@@ -1107,6 +1071,42 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
     [siteDailyModel.dailyData],
   );
   const includedDates = useMemo(() => dailyRows.map((row) => row.date).filter(Boolean), [dailyRows]);
+  const siteManpowerValidCount = useMemo(
+    () =>
+      dailyRows.reduce(
+        (sum, row) => sum + row.manpower.filter((item) => item.worker.trim() && Number(item.workHours || 0) > 0).length,
+        0,
+      ),
+    [dailyRows],
+  );
+  const siteWorkValidCount = useMemo(
+    () =>
+      dailyRows.reduce(
+        (sum, row) =>
+          sum +
+          row.workSets.filter((item) => resolvedValue(item.member || "", item.customMemberValue || "") && resolvedValue(item.process || "", item.customProcessValue || "")).length,
+        0,
+      ),
+    [dailyRows],
+  );
+  const sitePhotoValidCount = useMemo(
+    () => dailyRows.reduce((sum, row) => sum + rowPhotoCount(row), 0),
+    [dailyRows],
+  );
+  const siteDrawingValidCount = useMemo(
+    () => dailyRows.reduce((sum, row) => sum + getRowDrawings(row).length, 0),
+    [dailyRows],
+  );
+  const siteMediaValidCount = sitePhotoValidCount + siteDrawingValidCount;
+  const siteReadyToSubmit = hasSiteName && siteManpowerValidCount > 0 && siteWorkValidCount > 0 && siteMediaValidCount > 0;
+  const sitePendingInline = [
+    !hasSiteName ? "현장" : "",
+    siteManpowerValidCount === 0 ? "투입" : "",
+    siteWorkValidCount === 0 ? "작업" : "",
+    siteMediaValidCount === 0 ? "사진/도면" : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   useEffect(() => {
     if (!currentSiteKey || !hasSiteName) {
