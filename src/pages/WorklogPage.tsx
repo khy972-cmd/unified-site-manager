@@ -81,6 +81,7 @@ type SaveIntent = "draft" | "pending";
 type WorklogTab = "write" | "view";
 type GalleryKind = AttachmentType | null;
 type LegacyMedia = AttachmentRef & { url?: string };
+type SiteCardFilter = "all" | "pending" | "rejected" | "approved";
 
 const STATUS_META: Record<
   WorklogStatus,
@@ -825,6 +826,7 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
   const [siteMemo, setSiteMemo] = useState("");
   const [draftTick, setDraftTick] = useState(0);
   const [openDates, setOpenDates] = useState<Record<string, boolean>>({});
+  const [siteCardFilter, setSiteCardFilter] = useState<SiteCardFilter>("all");
 
   const loadKeyRef = useRef("");
   const activeMediaIdsRef = useRef<string[]>([]);
@@ -929,6 +931,10 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
         return a.siteName.localeCompare(b.siteName);
       });
   }, [siteList, sortedLogs, siteDraftMap]);
+  const filteredSiteCards = useMemo(() => {
+    if (siteCardFilter === "all") return siteCards;
+    return siteCards.filter((card) => card.status === siteCardFilter);
+  }, [siteCardFilter, siteCards]);
 
   const filteredSiteOptions = useMemo(() => {
     const q = normalizeText(siteSearch);
@@ -2024,20 +2030,39 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
               </div>
             </>
           ) : (
-            <div className="rounded-xl border border-border bg-card px-3 py-2 text-sm-app font-semibold text-text-sub">
-              현장 카드를 선택하면 날짜 누적 작업일지를 편집할 수 있습니다.
+            <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+              {[
+                { key: "all" as const, label: "전체" },
+                { key: "pending" as const, label: "요청" },
+                { key: "rejected" as const, label: "반려" },
+                { key: "approved" as const, label: "완료" },
+              ].map((chip) => (
+                <button
+                  key={`site_filter_${chip.key}`}
+                  type="button"
+                  onClick={() => setSiteCardFilter(chip.key)}
+                  className={cn(
+                    "h-10 px-3.5 rounded-full whitespace-nowrap flex-shrink-0 border transition-all cursor-pointer flex items-center justify-center",
+                    siteCardFilter === chip.key
+                      ? "bg-primary text-white border-primary font-bold shadow-sm"
+                      : "bg-card text-muted-foreground border-border hover:border-primary/50 font-medium",
+                  )}
+                >
+                  {chip.label}
+                </button>
+              ))}
             </div>
           )}
         </div>
       </section>
       {!hasSiteName ? (
         <section className="space-y-2 pt-3">
-          {siteCards.length === 0 ? (
+          {filteredSiteCards.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border bg-card px-4 py-12 text-center text-sm-app font-semibold text-text-sub">
-              등록된 현장이 없습니다.
+              {siteCards.length === 0 ? "등록된 현장이 없습니다." : "선택한 상태의 현장이 없습니다."}
             </div>
           ) : (
-            siteCards.map((card) => (
+            filteredSiteCards.map((card) => (
               <button
                 key={card.siteKey}
                 type="button"
