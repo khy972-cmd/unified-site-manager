@@ -2287,10 +2287,10 @@ function WorkerWorklogPage() {
                 </p>
                 <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-0.5 pr-1 no-scrollbar">
                   <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-sky-200 bg-sky-50 px-2 text-[12px] font-semibold text-sky-700">
-                    소속 HQ {card.dept || "미지정"}
+                    {card.dept || "미지정"}
                   </span>
                   <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-indigo-200 bg-indigo-50 px-2 text-[12px] font-semibold text-indigo-700">
-                    원청사 HQ {card.dept || "미지정"}
+                    {card.dept || "미지정"}
                   </span>
                   <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
                     사진 {Math.max(0, card.photoCount - card.receiptCount)}
@@ -2326,10 +2326,10 @@ function WorkerWorklogPage() {
                 </p>
                 <div className="mt-1 flex items-center gap-1.5 overflow-x-auto pb-0.5 pr-1 no-scrollbar">
                   <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-sky-200 bg-sky-50 px-2 text-[12px] font-semibold text-sky-700">
-                    소속 HQ {form.dept || "미지정"}
+                    {form.dept || "미지정"}
                   </span>
                   <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-indigo-200 bg-indigo-50 px-2 text-[12px] font-semibold text-indigo-700">
-                    원청사 HQ {affiliationLabel}
+                    {affiliationLabel}
                   </span>
                   <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
                     사진 {sitePhotoRows.length}
@@ -2583,16 +2583,24 @@ function WorkerWorklogPage() {
                         />
                         <div
                           className={cn(
-                            "rounded-xl border bg-background px-3 py-3 transition-colors hover:border-primary/40",
+                            "relative overflow-hidden rounded-xl border bg-background px-3 py-3 transition-colors hover:border-primary/40",
                             isRejectedRow ? "border-red-200 bg-red-50/40" : "border-border",
                             isCurrent && "border-primary/40 ring-1 ring-primary/20",
                             isLatest && "shadow-[0_0_0_1px_rgba(49,163,250,0.12)]",
                           )}
                         >
+                          <span
+                            className={cn(
+                              "absolute right-0 top-0 z-10 inline-flex h-6 items-center whitespace-nowrap rounded-bl-xl px-2.5 text-[10px] font-bold text-white",
+                              STATUS_META[row.status].cornerClass,
+                            )}
+                          >
+                            {STATUS_META[row.status].label}
+                          </span>
                           <button
                             type="button"
                             onClick={() => setOpenDates((prev) => ({ ...prev, [row.date]: !expanded }))}
-                            className="w-full text-left"
+                            className="w-full pr-10 text-left"
                           >
                             <div className="flex items-center justify-between gap-2">
                               <div className="min-w-0">
@@ -2614,11 +2622,30 @@ function WorkerWorklogPage() {
                                 <p className="mt-1 truncate text-tiny font-medium text-text-sub">
                                   {summarizeDailyRow(row)}
                                 </p>
+                                <div
+                                  className={cn(
+                                    "mt-1 flex items-center gap-1.5 overflow-x-auto pb-0.5 pr-1 no-scrollbar",
+                                    (isCurrent || isLatest) && "rounded-lg bg-primary-bg/40 px-1 py-1 shadow-[0_0_0_2px_rgba(49,163,250,0.12)]",
+                                  )}
+                                >
+                                  <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-sky-200 bg-sky-50 px-2 text-[12px] font-semibold text-sky-700">
+                                    {form.dept || "미지정"}
+                                  </span>
+                                  <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-indigo-200 bg-indigo-50 px-2 text-[12px] font-semibold text-indigo-700">
+                                    {affiliationLabel}
+                                  </span>
+                                  <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
+                                    사진 {rowPhotoCount(row)}
+                                  </span>
+                                  <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
+                                    도면 {getRowDrawings(row).length}
+                                  </span>
+                                  <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
+                                    확인서 {rowReceiptCount(row)}
+                                  </span>
+                                </div>
                               </div>
                               <div className="flex shrink-0 items-center gap-2">
-                                <span className={cn("inline-flex h-6 items-center whitespace-nowrap rounded-full border px-2 text-[11px] font-bold", STATUS_META[row.status].chipClass)}>
-                                  {STATUS_META[row.status].label}
-                                </span>
                                 {expanded ? <ChevronUp className="h-4 w-4 text-text-sub" /> : <ChevronDown className="h-4 w-4 text-text-sub" />}
                               </div>
                             </div>
@@ -2678,17 +2705,26 @@ function WorkerWorklogPage() {
                       <div className="flex gap-2 overflow-x-auto no-scrollbar pb-0.5">
                         {group.items.map((row) => {
                           const url = previewMap[row.key];
+                          const status = normalizePhotoStatus(row.item.status);
                           return (
                             <button
                               key={row.key}
                               type="button"
                               onClick={() => openMediaViewer(row.item, row.title)}
-                              className="h-[84px] w-[84px] shrink-0 overflow-hidden rounded-lg border border-border bg-muted"
+                              className="relative w-28 shrink-0 rounded-xl border border-border bg-bg-input p-1.5 text-left"
                             >
+                              <span
+                                className={cn(
+                                  "absolute left-2 top-2 z-10 rounded-md px-2 py-0.5 text-[11px] font-bold text-white",
+                                  status === "before" ? "bg-amber-500/90" : "bg-blue-500/90",
+                                )}
+                              >
+                                {photoStatusLabel(row.item.status)}
+                              </span>
                               {url ? (
-                                <img src={url} alt={row.title} className="h-full w-full object-cover" />
+                                <img src={url} alt={row.title} className="h-[104px] w-full rounded-lg object-cover" />
                               ) : (
-                                <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                <div className="flex h-[104px] w-full items-center justify-center rounded-lg bg-muted text-muted-foreground">
                                   <ImageIcon className="h-5 w-5" />
                                 </div>
                               )}
@@ -2731,17 +2767,26 @@ function WorkerWorklogPage() {
                       <div className="flex gap-2 overflow-x-auto no-scrollbar pb-0.5">
                         {group.items.map((row) => {
                           const url = previewMap[row.key];
+                          const status = normalizeDrawingStatus(row.item.status);
                           return (
                             <button
                               key={row.key}
                               type="button"
                               onClick={() => openMediaViewer(row.item, row.title)}
-                              className="h-[84px] w-[84px] shrink-0 overflow-hidden rounded-lg border border-border bg-muted"
+                              className="relative w-28 shrink-0 rounded-xl border border-border bg-bg-input p-1.5 text-left"
                             >
+                              <span
+                                className={cn(
+                                  "absolute left-2 top-2 z-10 rounded-md px-2 py-0.5 text-[11px] font-bold text-white",
+                                  status === "done" ? "bg-emerald-500/90" : "bg-sky-500/90",
+                                )}
+                              >
+                                {drawingStatusLabel(row.item.status)}
+                              </span>
                               {url ? (
-                                <img src={url} alt={row.title} className="h-full w-full object-cover" />
+                                <img src={url} alt={row.title} className="h-[104px] w-full rounded-lg object-cover" />
                               ) : (
-                                <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                <div className="flex h-[104px] w-full items-center justify-center rounded-lg bg-muted text-muted-foreground">
                                   <ImageIcon className="h-5 w-5" />
                                 </div>
                               )}
@@ -2789,12 +2834,15 @@ function WorkerWorklogPage() {
                               key={row.key}
                               type="button"
                               onClick={() => openMediaViewer(row.item, row.title)}
-                              className="h-[84px] w-[84px] shrink-0 overflow-hidden rounded-lg border border-border bg-muted"
+                              className="relative w-28 shrink-0 rounded-xl border border-border bg-bg-input p-1.5 text-left"
                             >
+                              <span className="absolute left-2 top-2 z-10 rounded-md bg-indigo-500/90 px-2 py-0.5 text-[11px] font-bold text-white">
+                                확인서
+                              </span>
                               {url ? (
-                                <img src={url} alt={row.title} className="h-full w-full object-cover" />
+                                <img src={url} alt={row.title} className="h-[104px] w-full rounded-lg object-cover" />
                               ) : (
-                                <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                <div className="flex h-[104px] w-full items-center justify-center rounded-lg bg-muted text-muted-foreground">
                                   <ImageIcon className="h-5 w-5" />
                                 </div>
                               )}

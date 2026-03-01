@@ -1262,12 +1262,6 @@ function WorkerSitePage() {
               )}
             </div>
 
-            {drawingSelectMode && (
-              <div className="mb-3 rounded-xl border border-border bg-bg-input px-3 py-2 text-sm-app font-semibold text-text-sub">
-                Select files then save or share.
-              </div>
-            )}
-
             <input ref={drawingInputRef} type="file" multiple accept="image/*" className="hidden" onChange={onDrawingUploadChange} />
 
             <button
@@ -1324,6 +1318,19 @@ function WorkerSitePage() {
                           )}
                         >
                           <div className="flex items-center gap-2">
+                            {drawingSelectMode && (
+                              <button
+                                type="button"
+                                onClick={() => toggleDrawingSelect(asset.id)}
+                                className={cn(
+                                  "inline-flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-full border-2 transition-all",
+                                  selected ? "border-primary bg-primary-bg text-primary" : "bg-card border-muted-foreground/30 text-transparent",
+                                )}
+                                aria-label={selected ? "unselect" : "select"}
+                              >
+                                <Check className="h-3.5 w-3.5" />
+                              </button>
+                            )}
                             <span
                               className={cn(
                                 "inline-flex h-5 shrink-0 items-center rounded-full px-2 text-[10px] font-bold",
@@ -1341,22 +1348,7 @@ function WorkerSitePage() {
                               <div className="text-[11px] text-muted-foreground">{asset.createdAt.slice(0, 10)}</div>
                             </div>
 
-                            {drawingSelectMode ? (
-                              <button
-                                type="button"
-                                onClick={() => toggleDrawingSelect(asset.id)}
-                                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-card"
-                              >
-                                <span className={cn(
-                                  "inline-flex h-4 w-4 items-center justify-center rounded-sm border",
-                                  selected
-                                    ? "border-primary bg-primary text-white"
-                                    : "border-border bg-card text-transparent"
-                                )}>
-                                  <Check className="h-3 w-3" />
-                                </span>
-                              </button>
-                            ) : (
+                            {drawingSelectMode ? null : (
                               <>
                                 <button
                                   type="button"
@@ -1451,12 +1443,6 @@ function WorkerSitePage() {
               )}
             </div>
 
-            {photoSelectMode && (
-              <div className="mb-3 rounded-xl border border-border bg-bg-input px-3 py-2 text-sm-app font-semibold text-text-sub">
-                Select files then save or share.
-              </div>
-            )}
-
             {photoSheetSite && (
               <button
                 type="button"
@@ -1488,6 +1474,19 @@ function WorkerSitePage() {
                           )}
                         >
                           <div className="flex items-center gap-2">
+                            {photoSelectMode && (
+                              <button
+                                type="button"
+                                onClick={() => togglePhotoSelect(asset.id)}
+                                className={cn(
+                                  "inline-flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-full border-2 transition-all",
+                                  selected ? "border-primary bg-primary-bg text-primary" : "bg-card border-muted-foreground/30 text-transparent",
+                                )}
+                                aria-label={selected ? "unselect" : "select"}
+                              >
+                                <Check className="h-3.5 w-3.5" />
+                              </button>
+                            )}
                             <img
                               src={asset.url}
                               alt={asset.name}
@@ -1498,22 +1497,7 @@ function WorkerSitePage() {
                               <div className="text-[11px] text-muted-foreground">{asset.createdAt.slice(0, 10)}</div>
                             </div>
 
-                            {photoSelectMode ? (
-                              <button
-                                type="button"
-                                onClick={() => togglePhotoSelect(asset.id)}
-                                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-card"
-                              >
-                                <span className={cn(
-                                  "inline-flex h-4 w-4 items-center justify-center rounded-sm border",
-                                  selected
-                                    ? "border-primary bg-primary text-white"
-                                    : "border-border bg-card text-transparent"
-                                )}>
-                                  <Check className="h-3 w-3" />
-                                </span>
-                              </button>
-                            ) : (
+                            {photoSelectMode ? null : (
                               <button
                                 type="button"
                                 onClick={() => photoSheetSite && openPhotoAssetPreview(asset, photoSheetSite.name)}
