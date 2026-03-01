@@ -180,6 +180,7 @@ interface SiteCardSummary {
   dateCount: number;
   photoCount: number;
   drawingCount: number;
+  receiptCount: number;
   lastUpdatedAt: string;
   latestVersion: number;
 }
@@ -638,7 +639,7 @@ function siteCardActionHint(status: WorklogStatus) {
   if (status === "pending") return "승인 대기중 · 요청취소 또는 결과 확인";
   if (status === "rejected") return "반려됨 · 반려 날짜부터 수정";
   if (status === "approved") return "완료 · 변경 시 날짜 선택 후 수정";
-  return "작성중 · 필요한 날짜만 수정";
+  return "필요한 날짜만 수정";
 }
 function buildMemoStorageKey(siteValue: string, siteName: string, date: string) {
   return `${siteKey(siteValue, siteName)}|${date}`;
@@ -873,6 +874,7 @@ function WorkerWorklogPage() {
           dateCount: draft?.includedDates.length || 0,
           photoCount: 0,
           drawingCount: 0,
+          receiptCount: 0,
           lastUpdatedAt: draft?.lastUpdatedAt || "",
           latestVersion: draft?.latestVersion || 0,
         },
@@ -894,11 +896,15 @@ function WorkerWorklogPage() {
           dateCount: 0,
           photoCount: 0,
           drawingCount: 0,
+          receiptCount: 0,
           lastUpdatedAt: "",
           latestVersion: 0,
         },
         dates: new Set<string>(),
       };
+      const logReceiptCount = Array.isArray(log.photos)
+        ? log.photos.filter((item) => isReceiptPhoto(item as LegacyMedia)).length
+        : 0;
 
       if (log.workDate) existing.dates.add(log.workDate);
       existing.base = {
@@ -909,6 +915,7 @@ function WorkerWorklogPage() {
         status: draft?.status || existing.base.status,
         photoCount: existing.base.photoCount + Number(log.photoCount || 0),
         drawingCount: existing.base.drawingCount + Number(log.drawingCount || 0),
+        receiptCount: existing.base.receiptCount + logReceiptCount,
         lastUpdatedAt:
           existing.base.lastUpdatedAt && existing.base.lastUpdatedAt > (log.updatedAt || log.createdAt)
             ? existing.base.lastUpdatedAt
@@ -2007,6 +2014,13 @@ function WorkerWorklogPage() {
 
   const openDrawingMarking = async (item: LegacyMedia, index: number) => {
     if (!ensureEditableSite()) return;
+    const previewKey = `drawing_${mediaItemKey(item, index)}`;
+    const cachedPreview = previewMap[previewKey];
+    if (cachedPreview) {
+      setMarking({ open: true, index, imageSrc: cachedPreview });
+      return;
+    }
+
     const legacy = getLegacyUrl(item);
     if (legacy) {
       setMarking({ open: true, index, imageSrc: legacy });
@@ -2260,10 +2274,13 @@ function WorkerWorklogPage() {
                     원청사 {card.dept || "미지정"}
                   </span>
                   <span className="inline-flex h-6 items-center rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
-                    사진 {card.photoCount}
+                    사진 {Math.max(0, card.photoCount - card.receiptCount)}
                   </span>
                   <span className="inline-flex h-6 items-center rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
                     도면 {card.drawingCount}
+                  </span>
+                  <span className="inline-flex h-6 items-center rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
+                    확인서 {card.receiptCount}
                   </span>
                 </div>
                 <p className="mt-1 truncate text-[12px] font-semibold text-text-sub">{siteCardActionHint(card.status)}</p>
@@ -2294,6 +2311,17 @@ function WorkerWorklogPage() {
                   </span>
                   <span className="inline-flex h-6 items-center rounded-lg border border-indigo-200 bg-indigo-50 px-2 text-[12px] font-semibold text-indigo-700">
                     원청사 {affiliationLabel}
+                  </span>
+                </div>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <span className="inline-flex h-6 items-center rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
+                    사진 {sitePhotoRows.length}
+                  </span>
+                  <span className="inline-flex h-6 items-center rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
+                    도면 {siteDrawingRows.length}
+                  </span>
+                  <span className="inline-flex h-6 items-center rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
+                    확인서 {siteReceiptRows.length}
                   </span>
                 </div>
               </div>
@@ -2344,29 +2372,34 @@ function WorkerWorklogPage() {
 
             <section className="rounded-2xl border border-border bg-card px-4 py-3 shadow-soft">
               <div className="mb-2 flex items-center justify-between">
-                <p className="text-sm-app font-bold text-header-navy">날짜 섹션 편집 ({includedDates.length})</p>
-                <span className="text-tiny font-semibold text-text-sub">접기/펼치기</span>
+                <p className="text-sm-app font-bold text-header-navy">작업일지 편집</p>
+                <span className="text-tiny font-semibold text-text-sub">{includedDates.length}건</span>
               </div>
               <div className="space-y-1.5">
                 {dailyRows.map((row) => {
                   const expanded = !!openDates[row.date];
                   const isCurrent = row.date === form.workDate;
                   return (
-                    <div key={`write_date_${row.date}`} className={cn("rounded-lg border px-3 py-2", isCurrent ? "border-primary/50 bg-primary-bg/40" : "border-border bg-background")}>
+                    <div key={`write_date_${row.date}`} className={cn("rounded-xl border px-3 py-2.5", isCurrent ? "border-primary/50 bg-primary-bg/40" : "border-border bg-background")}>
                       <button
                         type="button"
                         onClick={() => setOpenDates((prev) => ({ ...prev, [row.date]: !expanded }))}
-                        className="flex w-full items-center justify-between"
+                        className="flex w-full items-center justify-between gap-2"
                       >
-                        <p className="text-sm-app font-semibold text-header-navy">
-                          {row.date} {isCurrent ? "(현재 편집)" : ""}
-                        </p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-sm-app font-semibold text-header-navy">{row.date}</p>
+                          {isCurrent && (
+                            <span className="inline-flex h-5 items-center rounded-full border border-primary/30 bg-primary-bg px-2 text-[10px] font-bold text-primary">
+                              현재
+                            </span>
+                          )}
+                        </div>
                         {expanded ? <ChevronUp className="h-4 w-4 text-text-sub" /> : <ChevronDown className="h-4 w-4 text-text-sub" />}
                       </button>
                       {expanded && (
                         <div className="mt-1.5 flex items-center justify-between">
                           <p className="text-tiny font-medium text-text-sub">
-                            투입 {row.manpower.length} · 작업 {row.workSets.length} · 사진 {rowPhotoCount(row)} · 도면 {getRowDrawings(row).length}
+                            투입 {row.manpower.length} · 작업 {row.workSets.length} · 사진 {rowPhotoCount(row)} · 도면 {getRowDrawings(row).length} · 확인서 {rowReceiptCount(row)}
                           </p>
                           <button
                             type="button"
@@ -2496,53 +2529,90 @@ function WorkerWorklogPage() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {dailyRows.map((row) => {
+                  {dailyRows.map((row, index) => {
                     const expanded = !!openDates[row.date];
                     const isRejectedRow = row.status === "rejected";
+                    const isCurrent = row.date === form.workDate;
+                    const isLatest = index === 0;
                     return (
-                      <div
-                        key={`${row.date}_${row.versions}`}
-                        className={cn(
-                          "rounded-xl border bg-background px-3 py-3",
-                          isRejectedRow ? "border-red-200 bg-red-50/40" : "border-border",
+                      <div key={`${row.date}_${row.versions}`} className="relative pl-7">
+                        {index < dailyRows.length - 1 && (
+                          <span
+                            className={cn(
+                              "absolute left-[9px] top-6 bottom-[-10px] w-[2px] rounded-full",
+                              isRejectedRow ? "bg-red-200" : "bg-border",
+                            )}
+                          />
                         )}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setOpenDates((prev) => ({ ...prev, [row.date]: !expanded }))}
-                          className="w-full text-left"
+                        <span
+                          className={cn(
+                            "absolute left-0 top-1 inline-flex h-[18px] w-[18px] rounded-full border-2 bg-card",
+                            row.status === "approved"
+                              ? "border-emerald-500"
+                              : row.status === "pending"
+                                ? "border-indigo-500"
+                                : row.status === "rejected"
+                                  ? "border-red-500"
+                                  : "border-primary",
+                            isCurrent && "ring-2 ring-primary/30",
+                          )}
+                        />
+                        <div
+                          className={cn(
+                            "rounded-xl border bg-background px-3 py-3",
+                            isRejectedRow ? "border-red-200 bg-red-50/40" : "border-border",
+                            isCurrent && "border-primary/40",
+                          )}
                         >
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm-app font-bold text-header-navy">
-                              {row.date} · v{row.versions}
-                            </p>
-                            <div className="flex items-center gap-2">
-                              <span className={cn("inline-flex h-6 items-center rounded-full border px-2 text-[11px] font-bold", STATUS_META[row.status].chipClass)}>
-                                {STATUS_META[row.status].label}
-                              </span>
-                              {expanded ? <ChevronUp className="h-4 w-4 text-text-sub" /> : <ChevronDown className="h-4 w-4 text-text-sub" />}
+                          <button
+                            type="button"
+                            onClick={() => setOpenDates((prev) => ({ ...prev, [row.date]: !expanded }))}
+                            className="w-full text-left"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <p className="text-sm-app font-bold text-header-navy">
+                                    {row.date} · v{row.versions}
+                                  </p>
+                                  {isLatest && (
+                                    <span className="inline-flex h-5 items-center rounded-full border border-primary/30 bg-primary-bg px-2 text-[10px] font-bold text-primary">
+                                      최신
+                                    </span>
+                                  )}
+                                  {isCurrent && (
+                                    <span className="inline-flex h-5 items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 text-[10px] font-bold text-indigo-700">
+                                      현재
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="mt-1 text-tiny font-medium text-text-sub">
+                                  투입 {row.manpower.length}명 · 작업 {row.workSets.length}건 · 사진 {rowPhotoCount(row)} · 도면 {getRowDrawings(row).length} · 확인서 {rowReceiptCount(row)}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={cn("inline-flex h-6 items-center rounded-full border px-2 text-[11px] font-bold", STATUS_META[row.status].chipClass)}>
+                                  {STATUS_META[row.status].label}
+                                </span>
+                                {expanded ? <ChevronUp className="h-4 w-4 text-text-sub" /> : <ChevronDown className="h-4 w-4 text-text-sub" />}
+                              </div>
                             </div>
-                          </div>
-                          <p className="mt-1 text-tiny font-medium text-text-sub">
-                            투입 {row.manpower.length}명 · 작업 {row.workSets.length}건 · 사진 {rowPhotoCount(row)} · 도면 {getRowDrawings(row).length} · 확인서 {rowReceiptCount(row)}
-                          </p>
-                        </button>
-                        {expanded && (
-                          <div className="mt-2 rounded-lg border border-border bg-card px-3 py-2.5">
-                            <p className="text-tiny font-medium text-text-sub">
-                              날짜 수정은 아래 버튼으로 바로 불러오세요.
-                            </p>
-                            <div className="mt-2 flex items-center justify-end">
-                              <button
-                                type="button"
-                                onClick={() => moveToDate(row.date)}
-                                className="h-8 rounded-lg border border-primary/40 bg-primary-bg px-2.5 text-[11px] font-semibold text-primary"
-                              >
-                                해당 날짜 수정
-                              </button>
+                          </button>
+                          {expanded && (
+                            <div className="mt-2 rounded-lg border border-border bg-card px-3 py-2">
+                              <p className="truncate text-tiny font-medium text-text-sub">날짜 수정은 버튼으로 바로 불러오세요.</p>
+                              <div className="mt-2 flex items-center justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => moveToDate(row.date)}
+                                  className="h-8 rounded-lg border border-primary/40 bg-primary-bg px-2.5 text-[11px] font-semibold text-primary"
+                                >
+                                  해당 날짜 수정
+                                </button>
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -3019,7 +3089,7 @@ function WorkerWorklogPage() {
                               }));
                             }}
                             className={cn(
-                              "h-8 px-3 rounded-full border text-tiny font-semibold whitespace-nowrap",
+                              "inline-flex h-8 min-w-[72px] items-center justify-center rounded-full border px-3 text-tiny font-semibold whitespace-nowrap shrink-0",
                               row.member === chip
                                 ? "bg-primary text-primary-foreground border-primary"
                                 : "bg-card text-text-sub border-border",
@@ -3062,7 +3132,7 @@ function WorkerWorklogPage() {
                               }));
                             }}
                             className={cn(
-                              "h-8 px-3 rounded-full border text-tiny font-semibold whitespace-nowrap",
+                              "inline-flex h-8 min-w-[72px] items-center justify-center rounded-full border px-3 text-tiny font-semibold whitespace-nowrap shrink-0",
                               row.process === chip
                                 ? "bg-primary text-primary-foreground border-primary"
                                 : "bg-card text-text-sub border-border",
@@ -3331,26 +3401,26 @@ function WorkerWorklogPage() {
                   <button
                     type="button"
                     onClick={() => photoInputRef.current?.click()}
-                    className="h-11 rounded-xl border border-primary/40 bg-primary-bg text-sm-app font-bold text-primary inline-flex items-center justify-center gap-1"
+                    className="h-[50px] rounded-xl border border-dashed border-primary bg-primary/5 text-sm-app font-bold text-primary inline-flex items-center justify-center gap-1.5 transition-colors hover:bg-primary/10"
                   >
                     <Camera className="w-4 h-4" /> 사진 업로드/촬영
                   </button>
                   <button
                     type="button"
                     onClick={() => drawingInputRef.current?.click()}
-                    className="h-11 rounded-xl border border-primary/40 bg-primary-bg text-sm-app font-bold text-primary inline-flex items-center justify-center gap-1"
+                    className="h-[50px] rounded-xl border border-dashed border-teal-300 bg-teal-50 text-sm-app font-bold text-teal-700 inline-flex items-center justify-center gap-1.5 transition-colors hover:bg-teal-100"
                   >
                     <ImageIcon className="w-4 h-4" /> 도면 추가
                   </button>
                   <button
                     type="button"
                     onClick={() => receiptInputRef.current?.click()}
-                    className="h-11 rounded-xl border border-indigo-200 bg-indigo-50 text-sm-app font-semibold text-indigo-700 inline-flex items-center justify-center gap-1"
+                    className="h-[50px] rounded-xl border border-dashed border-indigo-300 bg-indigo-50 text-sm-app font-bold text-indigo-700 inline-flex items-center justify-center gap-1.5 transition-colors hover:bg-indigo-100"
                   >
                     <ClipboardList className="w-4 h-4" /> 확인서 이미지
                   </button>
                 </div>
-                <p className="text-tiny text-text-sub">업로드는 작성 탭에서만 가능합니다.</p>
+                <p className="text-tiny text-text-sub">업로드는 작성 탭에서만 가능하며, 현장 문서함에 자동 누적됩니다.</p>
 
                 <input
                   ref={photoInputRef}
@@ -3397,9 +3467,10 @@ function WorkerWorklogPage() {
                     {normalPhotoRowsForEdit.map(({ item, index }, displayIndex) => {
                       const key = `photo_${mediaItemKey(item, index)}`;
                       const url = previewMap[key];
+                      const photoStatus = normalizePhotoStatus(item.status);
 
                       return (
-                        <div key={key} className="overflow-hidden rounded-lg border border-border bg-card">
+                        <div key={key} className="relative overflow-hidden rounded-xl border border-border bg-card">
                           <button
                             type="button"
                             onClick={() => openMediaViewer(item, `사진 ${displayIndex + 1}`)}
@@ -3413,11 +3484,22 @@ function WorkerWorklogPage() {
                               </div>
                             )}
                           </button>
+                          <span
+                            className={cn(
+                              "absolute left-1.5 top-1.5 inline-flex h-5 items-center rounded-md px-1.5 text-[10px] font-bold text-white",
+                              photoStatus === "before" ? "bg-amber-500/90" : "bg-primary/90",
+                            )}
+                          >
+                            {photoStatusLabel(item.status)}
+                          </span>
                           <div className="grid grid-cols-2 border-t border-border">
                             <button
                               type="button"
                               onClick={() => togglePhotoItemStatus(index)}
-                              className="h-8 border-r border-border text-[11px] font-semibold text-primary"
+                              className={cn(
+                                "h-8 border-r border-border text-[11px] font-semibold",
+                                photoStatus === "before" ? "bg-amber-50 text-amber-700" : "bg-primary-bg text-primary",
+                              )}
                             >
                               {photoStatusLabel(item.status)}
                             </button>
@@ -3446,9 +3528,10 @@ function WorkerWorklogPage() {
                     {form.drawings.map((item, index) => {
                       const key = `drawing_${mediaItemKey(item, index)}`;
                       const url = previewMap[key];
+                      const drawingStatus = normalizeDrawingStatus(item.status);
 
                       return (
-                        <div key={key} className="overflow-hidden rounded-lg border border-border bg-card">
+                        <div key={key} className="relative overflow-hidden rounded-xl border border-border bg-card">
                           <button
                             type="button"
                             onClick={() => openMediaViewer(item, `도면 ${index + 1}`)}
@@ -3462,11 +3545,22 @@ function WorkerWorklogPage() {
                               </div>
                             )}
                           </button>
+                          <span
+                            className={cn(
+                              "absolute left-1.5 top-1.5 inline-flex h-5 items-center rounded-md px-1.5 text-[10px] font-bold text-white",
+                              drawingStatus === "done" ? "bg-emerald-500/90" : "bg-sky-500/90",
+                            )}
+                          >
+                            {drawingStatusLabel(item.status)}
+                          </span>
                           <div className="grid grid-cols-3 border-t border-border">
                             <button
                               type="button"
                               onClick={() => toggleDrawingItemStatus(index)}
-                              className="h-8 border-r border-border text-[11px] font-semibold text-primary"
+                              className={cn(
+                                "h-8 border-r border-border text-[11px] font-semibold",
+                                drawingStatus === "done" ? "bg-emerald-50 text-emerald-700" : "bg-sky-50 text-sky-700",
+                              )}
                             >
                               {drawingStatusLabel(item.status)}
                             </button>
@@ -3504,7 +3598,7 @@ function WorkerWorklogPage() {
                       const url = previewMap[`photo_${mediaItemKey(item, index)}`];
 
                       return (
-                        <div key={key} className="overflow-hidden rounded-lg border border-border bg-card">
+                        <div key={key} className="relative overflow-hidden rounded-xl border border-border bg-card">
                           <button
                             type="button"
                             onClick={() => openMediaViewer(item, `확인서 ${displayIndex + 1}`)}
@@ -3518,6 +3612,9 @@ function WorkerWorklogPage() {
                               </div>
                             )}
                           </button>
+                          <span className="absolute left-1.5 top-1.5 inline-flex h-5 items-center rounded-md bg-indigo-500/90 px-1.5 text-[10px] font-bold text-white">
+                            확인서
+                          </span>
                           <div className="grid grid-cols-2 border-t border-border">
                             <div className="flex h-8 items-center justify-center border-r border-border text-[11px] font-semibold text-indigo-700">
                               확인서
