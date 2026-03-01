@@ -1,5 +1,6 @@
 ﻿import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useUserRole } from "@/hooks/useUserRole";
+import { useNavigate } from "react-router-dom";
 import {
   Search, Plus, X, FileText, MapPin, Trash2, ArrowLeft, Check, Upload, FileUp, Calendar, User, Building, Wrench, Eye, Edit3, ChevronDown, ChevronUp, Download, Share2, Camera, Lock, MapPinIcon, Info
 } from "lucide-react";
@@ -9,6 +10,8 @@ import { toast } from "sonner";
 import PreviewModal from "@/components/preview/PreviewModal";
 import FilePreviewModal, { type FilePreviewFile } from "@/components/viewer/FilePreviewModal";
 import { usePreviewZoomPan } from "@/hooks/usePreviewZoomPan";
+import { useWorklogs } from "@/hooks/useSupabaseWorklogs";
+import { getObjectUrl, revokeObjectUrl, type AttachmentRef } from "@/lib/attachmentStore";
 // PATCH START: shared site list + repo facade (no direct localStorage in UI)
 import { useSiteList } from "@/hooks/useSiteList";
 import { searchSites, type SiteListItem } from "@/lib/siteList";
@@ -143,6 +146,38 @@ type Doc = {
   status?: string;
 };
 
+type LegacyAttachmentRef = AttachmentRef & { url?: string };
+type Html2CanvasFn = (
+  element: HTMLElement,
+  options?: {
+    scale?: number;
+    useCORS?: boolean;
+    backgroundColor?: string;
+    logging?: boolean;
+    windowWidth?: number;
+    windowHeight?: number;
+  },
+) => Promise<HTMLCanvasElement>;
+type JsPdfInstance = {
+  addPage: () => void;
+  addImage: (imageData: string, format: string, x: number, y: number, width: number, height: number) => void;
+  save: (filename: string) => void;
+};
+type JsPdfConstructor = new (
+  orientation?: "p" | "portrait" | "l" | "landscape",
+  unit?: "pt" | "mm" | "cm" | "m" | "in" | "px",
+  format?: string | [number, number],
+) => JsPdfInstance;
+type ReportPdfWindow = Window & typeof globalThis & {
+  html2canvas?: Html2CanvasFn;
+  jspdf?: { jsPDF?: JsPdfConstructor };
+};
+
+function isAbortError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  return "name" in error && (error as { name?: string }).name === "AbortError";
+}
+
 const MOCK_DOCS: Record<string, Doc[]> = {
   "내문서함": [
     {
@@ -252,6 +287,7 @@ export default function DocPage() {
 }
 
 function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean }) {
+  const navigate = useNavigate();
   const DOC_TABS_FILTERED = restrictCompanyDocs ? ["내문서함", "도면함", "사진함", "조치"] : DOC_TABS;
   const [activeTab, setActiveTab] = useState(0);
   const [search, setSearch] = useState("");
@@ -259,6 +295,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
   const [visibleCount, setVisibleCount] = useState(5);
   const [punchFilter, setPunchFilter] = useState<'all' | 'open' | 'done'>('all');
   const [siteFilter, setSiteFilter] = useState('');
+  const [mediaSiteFilter, setMediaSiteFilter] = useState("all");
   const [showSiteDropdown, setShowSiteDropdown] = useState(false);
   const [uploadSheetOpen, setUploadSheetOpen] = useState(false);
   const [batchBusy, setBatchBusy] = useState(false);
@@ -339,15 +376,22 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
 
   // Supabase-backed punch data
   const { data: punchGroups = [] } = usePunchGroups();
+  const { data: worklogs = [] } = useWorklogs();
   const addItemMutation = useAddPunchItem();
   const updateItemMutation = useUpdatePunchItem();
   const deleteItemMutation = useDeletePunchItem();
   const savePunchGroupsMutation = useSavePunchGroups();
+  const linkedRefIdsRef = useRef<string[]>([]);
+  const [linkedMediaDocs, setLinkedMediaDocs] = useState<{ photos: Doc[]; drawings: Doc[] }>({
+    photos: [],
+    drawings: [],
+  });
 
   const tabKey = DOC_TABS_FILTERED[activeTab];
   const isPunch = tabKey === '조치';
   const isMyDocs = tabKey === '내문서함';
-  const isBlueprint = tabKey === '도면함';
+  const isMediaArchiveTab = tabKey === "도면함" || tabKey === "사진함";
+  const isBlueprint = false;
 
   const bpAffiliationOptions = useMemo(() => {
     const base = ["포스코건설", "GS건설", "현대건설", "대보건설", "기타"];
@@ -444,14 +488,147 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     };
   }, [punchGroups]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const toDocFiles = async (refs: LegacyAttachmentRef[], kind: "photo" | "drawing") => {
+      const files: DocFile[] = [];
+      const usedIds: string[] = [];
+
+      for (let index = 0; index < refs.length; index += 1) {
+        const row = refs[index];
+        const legacyUrl = typeof row?.url === "string" ? row.url : "";
+
+        let url = legacyUrl;
+        if (!url && row?.id) {
+          url = (await getObjectUrl(row.id)) || "";
+          if (url) usedIds.push(row.id);
+        }
+
+        if (!url) continue;
+        files.push({
+          id: row.id || `${kind}_${index}`,
+          name: `${kind === "photo" ? "사진" : "도면"}_${index + 1}.jpg`,
+          type: "img",
+          url,
+          size: "-",
+          ext: "JPG",
+          version: "v1",
+          docType: kind,
+        });
+      }
+
+      return { files, usedIds };
+    };
+
+    async function buildLinkedDocs() {
+      const photoDocs: Doc[] = [];
+      const drawingDocs: Doc[] = [];
+      const allUsedIds: string[] = [];
+
+      for (const log of worklogs) {
+        const siteName = log.siteName || log.siteValue || "현장 미지정";
+        const baseTime = (log.updatedAt || log.createdAt || "").slice(11, 16);
+
+        const photoRows = (log.photos || []) as LegacyAttachmentRef[];
+        if (photoRows.length > 0) {
+          const { files, usedIds } = await toDocFiles(photoRows, "photo");
+          allUsedIds.push(...usedIds);
+          if (files.length > 0) {
+            photoDocs.push({
+              id: `wl_photo_${log.id}`,
+              title: siteName,
+              author: "작업일지",
+              date: log.workDate || "",
+              time: baseTime,
+              contractor: log.dept || "",
+              affiliation: log.dept || "",
+              files,
+            });
+          }
+        }
+
+        const drawingRows = (log.drawings || []) as LegacyAttachmentRef[];
+        if (drawingRows.length > 0) {
+          const { files, usedIds } = await toDocFiles(drawingRows, "drawing");
+          allUsedIds.push(...usedIds);
+          if (files.length > 0) {
+            drawingDocs.push({
+              id: `wl_drawing_${log.id}`,
+              title: siteName,
+              author: "작업일지",
+              date: log.workDate || "",
+              time: baseTime,
+              contractor: log.dept || "",
+              affiliation: log.dept || "",
+              files,
+            });
+          }
+        }
+      }
+
+      if (cancelled) return;
+
+      const prevIds = linkedRefIdsRef.current;
+      prevIds.forEach((id) => {
+        if (!allUsedIds.includes(id)) {
+          revokeObjectUrl(id);
+        }
+      });
+      linkedRefIdsRef.current = allUsedIds;
+
+      const sortByDate = (left: Doc, right: Doc) => {
+        const leftKey = `${left.date || ""} ${left.time || ""}`;
+        const rightKey = `${right.date || ""} ${right.time || ""}`;
+        return rightKey.localeCompare(leftKey);
+      };
+
+      setLinkedMediaDocs({
+        photos: photoDocs.sort(sortByDate),
+        drawings: drawingDocs.sort(sortByDate),
+      });
+    }
+
+    buildLinkedDocs();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [worklogs]);
+
+  useEffect(() => {
+    return () => {
+      linkedRefIdsRef.current.forEach((id) => revokeObjectUrl(id));
+      linkedRefIdsRef.current = [];
+    };
+  }, []);
+
+  const docsByTab = useMemo(() => {
+    const base = { ...MOCK_DOCS };
+    const photoMerged = [...linkedMediaDocs.photos];
+    const drawingMerged = [...linkedMediaDocs.drawings];
+    return {
+      ...base,
+      "사진함": photoMerged,
+      "도면함": drawingMerged,
+    } as Record<string, Doc[]>;
+  }, [linkedMediaDocs]);
+
+  const mediaSiteOptions = useMemo(() => {
+    if (!isMediaArchiveTab) return [] as string[];
+    const rows = docsByTab[tabKey] || [];
+    return Array.from(new Set(rows.map((doc) => doc.title).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ko"));
+  }, [docsByTab, isMediaArchiveTab, tabKey]);
+
   // Filtered docs (for non-punch tabs)
   const filteredDocs = useMemo(() => {
     if (isPunch) return [];
     const q = search.toLowerCase();
-    return (MOCK_DOCS[tabKey] || []).filter(doc => {
+    return (docsByTab[tabKey] || []).filter(doc => {
+      if (isMediaArchiveTab && mediaSiteFilter !== "all" && doc.title !== mediaSiteFilter) return false;
       return doc.title.toLowerCase().includes(q) || (doc.contractor || '').toLowerCase().includes(q);
     });
-  }, [activeTab, search, tabKey, isPunch]);
+  }, [search, tabKey, isPunch, docsByTab, isMediaArchiveTab, mediaSiteFilter]);
 
   // Filtered punch groups
   const filteredPunchGroups = useMemo(() => {
@@ -525,10 +702,17 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     };
   }, [uploadSheetOpen]);
 
+  useEffect(() => {
+    if (!uploadSheetOpen) return;
+    if (!isMediaArchiveTab) return;
+    setUploadSheetOpen(false);
+  }, [isMediaArchiveTab, uploadSheetOpen]);
+
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -872,7 +1056,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
   }, []);
 
   const ensureReportPdfLibs = useCallback(async () => {
-    const w = window as typeof window & { html2canvas?: any; jspdf?: any };
+    const w = window as ReportPdfWindow;
     if (!w.html2canvas) {
       await loadScript("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js");
     }
@@ -893,7 +1077,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
 
     try {
       await ensureReportPdfLibs();
-      const w = window as typeof window & { html2canvas?: any; jspdf?: { jsPDF: any } };
+      const w = window as ReportPdfWindow;
       const html2canvas = w.html2canvas;
       const jsPDF = w.jspdf?.jsPDF;
       if (!html2canvas || !jsPDF) {
@@ -1043,7 +1227,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
         }
 
         const datePart = (reportModel.date || new Date().toISOString().split("T")[0]).slice(0, 10);
-        const sitePart = (reportModel.siteName || "현장").replace(/[\\/:*?\"<>|]+/g, "_").trim() || "현장";
+        const sitePart = (reportModel.siteName || "현장").replace(/[\\/:*?"<>|]+/g, "_").trim() || "현장";
         pdf.save(`${datePart}-${sitePart}-보고서.pdf`);
       } finally {
         clone.remove();
@@ -1071,7 +1255,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
 
     try {
       await ensureReportPdfLibs();
-      const w = window as typeof window & { html2canvas?: any };
+      const w = window as ReportPdfWindow;
       const html2canvas = w.html2canvas;
       if (!html2canvas) {
         await generateReportPDF();
@@ -1092,7 +1276,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
       }
 
       const datePart = (reportModel.date || new Date().toISOString().split("T")[0]).slice(0, 10);
-      const sitePart = (reportModel.siteName || "현장").replace(/[\\/:*?\"<>|]+/g, "_").trim() || "현장";
+      const sitePart = (reportModel.siteName || "현장").replace(/[\\/:*?"<>|]+/g, "_").trim() || "현장";
       const fileName = `${datePart}-${sitePart}-보고서.png`;
       const shareFile = new File([blob], fileName, { type: "image/png" });
 
@@ -1103,8 +1287,8 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
       }
 
       await generateReportPDF();
-    } catch (e: any) {
-      if (e?.name === "AbortError") return;
+    } catch (e) {
+      if (isAbortError(e)) return;
       await generateReportPDF();
     }
   }, [ensureReportPdfLibs, flushReportEditsToState, generateReportPDF, reportModel]);
@@ -1151,11 +1335,12 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/*';
-    input.onchange = (e: any) => {
-      const file = e.target.files?.[0];
+    input.onchange = (e: Event) => {
+      const target = e.target as HTMLInputElement | null;
+      const file = target?.files?.[0];
       if (!file || !detailGroupId) return;
       const reader = new FileReader();
-      reader.onload = (ev) => {
+      reader.onload = (ev: ProgressEvent<FileReader>) => {
         updateItemMutation.mutate({
           groupId: detailGroupId,
           itemId,
@@ -1250,6 +1435,12 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     });
   };
 
+  const extractWorklogId = (docId: string) => {
+    if (docId.startsWith("wl_photo_")) return docId.replace("wl_photo_", "");
+    if (docId.startsWith("wl_drawing_")) return docId.replace("wl_drawing_", "");
+    return "";
+  };
+
   const inferRequiredDocType = useCallback((file?: DocFile, doc?: Doc): RequiredDocKey | undefined => {
     const raw = `${file?.docType || ""} ${file?.name || ""} ${doc?.title || ""}`.toLowerCase();
     if (!raw) return undefined;
@@ -1265,7 +1456,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
 
   const requiredDocByType = useMemo(() => {
     const bucket: Partial<Record<RequiredDocKey, { doc: Doc; file: DocFile }>> = {};
-    const myDocs = MOCK_DOCS["내문서함"] || [];
+    const myDocs = docsByTab["내문서함"] || [];
 
     for (const doc of myDocs) {
       const files = [...(doc.files || [])].reverse();
@@ -1406,7 +1597,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
       });
     }
 
-    const docs = (MOCK_DOCS[tabKey] || []).filter(d => selectedIds.has(d.id));
+    const docs = (docsByTab[tabKey] || []).filter(d => selectedIds.has(d.id));
     return docs.flatMap(d =>
       (d.files || []).map(f => ({
         url: resolveFileUrl(f),
@@ -1471,8 +1662,8 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
       } else {
         toast.error('이 기기는 파일 공유를 지원하지 않습니다. (저장을 이용해주세요)');
       }
-    } catch (e: any) {
-      if (e?.name !== 'AbortError') toast.error('공유에 실패했습니다.');
+    } catch (e) {
+      if (!isAbortError(e)) toast.error('공유에 실패했습니다.');
     } finally {
       setBatchBusy(false);
     }
@@ -1487,6 +1678,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
     setPunchFilter('all');
     setSiteFilter('');
     setDetailGroupId(null);
+    setMediaSiteFilter("all");
     setShowSiteDropdown(false);
     setUploadSheetOpen(false);
     setSelectedFiles([]);
@@ -1536,6 +1728,11 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
   const handleUpload = () => {
     // PATCH START: strict site selection + repo save (site_id + site_name)
     void (async () => {
+      if (isMediaArchiveTab) {
+        toast.error("사진/도면 업로드는 작업일지에서만 가능합니다.");
+        return;
+      }
+
       if (selectedFiles.length === 0) {
         toast.error("선택된 파일이 없습니다.");
         return;
@@ -1959,6 +2156,26 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
         </div>
       )}
 
+      {!detailGroupId && isMediaArchiveTab && (
+        <div className="mb-4 grid grid-cols-2 gap-2">
+          <select
+            value={mediaSiteFilter}
+            onChange={(e) => setMediaSiteFilter(e.target.value)}
+            className="h-[46px] rounded-xl border border-border bg-card px-3 text-[14px] font-semibold text-foreground outline-none transition-all hover:border-primary/50 focus:border-primary"
+          >
+            <option value="all">전체 현장</option>
+            {mediaSiteOptions.map((site) => (
+              <option key={site} value={site}>
+                {site}
+              </option>
+            ))}
+          </select>
+          <div className="h-[46px] rounded-xl border border-border bg-muted/40 px-3 text-[13px] font-semibold text-text-sub flex items-center justify-center">
+            자동 집계 {filteredDocs.length}건
+          </div>
+        </div>
+      )}
+
       {/* Punch Summary */}
       {isPunch && !detailGroupId && (
         <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
@@ -2056,12 +2273,12 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
             <div className="space-y-3 max-[640px]:space-y-2.5">
               {isMyDocs && (
                 <>
-                  <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-2.5">
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2.5">
                     <div className="flex items-center gap-2.5">
-                      <div className="inline-flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full border border-sky-300 bg-white text-sky-600">
+                      <div className="inline-flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full border border-rose-300 bg-white text-rose-600">
                         <Info className="h-3.5 w-3.5" />
                       </div>
-                      <div className="min-w-0 text-[14px] font-semibold leading-none text-sky-800">
+                      <div className="min-w-0 text-[14px] font-semibold leading-none text-rose-800">
                         필수서류 7개 중 {Math.max(0, 7 - submittedRequiredCount)}개 미제출입니다.
                       </div>
                     </div>
@@ -2170,32 +2387,54 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
               )}
 
               {!isMyDocs && (displayedDocs.length === 0 ? (
-                <EmptyState />
+                isMediaArchiveTab ? (
+                  <div className="rounded-2xl border border-dashed border-border bg-card px-4 py-10 text-center">
+                    <p className="text-[16px] font-semibold text-header-navy">등록된 자료가 없습니다.</p>
+                    <p className="mt-1 text-[13px] text-text-sub">작업일지에서 사진/도면을 등록하면 자동으로 표시됩니다.</p>
+                  </div>
+                ) : (
+                  <EmptyState />
+                )
               ) : displayedDocs.map(doc => {
                 const isSelected = selectedIds.has(doc.id);
+                const canSelect = !isMediaArchiveTab;
                 const primaryFile = doc.files?.[0];
                 const hasFile = !!primaryFile && !!resolveFileUrl(primaryFile);
                 const repImg = doc.files?.find(f => f.type === 'img');
                 const thumbUrl = repImg ? ((repImg.currentView === 'after' ? repImg.url_after : repImg.url_before) || repImg.url) : null;
+                const linkedWorklogId = extractWorklogId(doc.id);
 
                 return (
-                  <div key={doc.id} onClick={() => toggleSelect(doc.id)} className={cn("bg-card rounded-2xl p-3.5 max-[640px]:p-3 cursor-pointer transition-all shadow-soft flex gap-2.5 max-[640px]:gap-2 items-center", isSelected && "border-2 border-primary bg-sky-50/50 shadow-[0_0_0_2px_rgba(49,163,250,0.1)]")}>
-                    <div className={cn("w-[20px] h-[20px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all", isSelected ? "bg-sky-500 border-sky-500 shadow-[0_2px_8px_rgba(14,165,233,0.3)]" : "bg-card border-muted-foreground/30")}>
-                      {isSelected && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
-                    </div>
+                  <div
+                    key={doc.id}
+                    onClick={() => {
+                      if (canSelect) {
+                        toggleSelect(doc.id);
+                        return;
+                      }
+                      if (primaryFile) openDocPreview(doc, primaryFile);
+                    }}
+                    className={cn(
+                      "bg-card rounded-2xl p-3.5 max-[640px]:p-3 cursor-pointer transition-all shadow-soft flex gap-2.5 max-[640px]:gap-2 items-center",
+                      canSelect && isSelected && "border-2 border-primary bg-sky-50/50 shadow-[0_0_0_2px_rgba(49,163,250,0.1)]",
+                    )}
+                  >
+                    {canSelect && (
+                      <div className={cn("w-[20px] h-[20px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all", isSelected ? "bg-sky-500 border-sky-500 shadow-[0_2px_8px_rgba(14,165,233,0.3)]" : "bg-card border-muted-foreground/30")}>
+                        {isSelected && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
+                      </div>
+                    )}
                     <div className="w-[64px] h-[64px] max-[640px]:w-[60px] max-[640px]:h-[60px] rounded-xl bg-muted border border-border overflow-hidden shrink-0 flex items-center justify-center">
                       {thumbUrl ? <img src={thumbUrl} alt="" className="w-full h-full object-cover" /> : <FileText className="w-7 h-7 text-muted-foreground" />}
                     </div>
                     <div className="flex-1 min-w-0 flex flex-col gap-0.5 max-[640px]:gap-0.5 pt-0.5 leading-tight">
                       {doc.contractor && (
                         <div className="flex gap-1.5 flex-wrap mb-1.5 items-center">
-                          {/* 소속 */}
                           {doc.affiliation && (
                             <span className="text-[12px] px-2.5 py-1 rounded-md bg-[#e0f2fe] text-[#0284c7] border border-[#bae6fd] font-bold leading-none">
                               {doc.affiliation}
                             </span>
                           )}
-                          {/* 원청사 */}
                           <span className="text-[12px] px-2.5 py-1 rounded-md bg-slate-50 text-slate-600 border border-slate-200 font-bold leading-none">
                             {doc.contractor}
                           </span>
@@ -2239,6 +2478,46 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
                           >
                             <Eye className="w-3.5 h-3.5" />
                             미리보기
+                          </button>
+                        </div>
+                      )}
+
+                      {isMediaArchiveTab && (
+                        <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            className={cn(
+                              "h-[32px] w-full rounded-[10px] border text-[12px] font-[800] flex items-center justify-center gap-1.5 transition-all duration-200",
+                              hasFile
+                                ? "bg-indigo-50 border-indigo-200 text-indigo-500 hover:bg-indigo-100 hover:border-indigo-300"
+                                : "bg-muted border-border text-muted-foreground opacity-60 cursor-not-allowed"
+                            )}
+                            disabled={!hasFile}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (primaryFile) openDocPreview(doc, primaryFile);
+                            }}
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            미리보기
+                          </button>
+                          <button
+                            type="button"
+                            className={cn(
+                              "h-[32px] w-full rounded-[10px] border text-[12px] font-[800] flex items-center justify-center gap-1.5 transition-all duration-200",
+                              linkedWorklogId
+                                ? "bg-sky-50 border-sky-200 text-sky-700 hover:bg-sky-100 hover:border-sky-300"
+                                : "bg-muted border-border text-muted-foreground opacity-60 cursor-not-allowed"
+                            )}
+                            disabled={!linkedWorklogId}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!linkedWorklogId) return;
+                              navigate(`/worklog?focus=${encodeURIComponent(linkedWorklogId)}`);
+                            }}
+                          >
+                            <MapPinIcon className="w-3.5 h-3.5" />
+                            일지로 이동
                           </button>
                         </div>
                       )}
@@ -2362,7 +2641,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
       )}
 
       {/* Batch Action Bar */}
-      {selectedIds.size > 0 && !detailGroupId && (
+      {selectedIds.size > 0 && !detailGroupId && !isMediaArchiveTab && (
         <div className="fixed bottom-[calc(65px+14px+env(safe-area-inset-bottom,0px))] left-1/2 -translate-x-1/2 z-[5000] w-[calc(100%-32px)] max-w-[420px] animate-fade-in">
           <div className="bg-card rounded-xl px-2 py-2 grid grid-cols-3 gap-2 border border-gray-200">
             <button
@@ -2399,7 +2678,7 @@ function DocPageInner({ restrictCompanyDocs }: { restrictCompanyDocs: boolean })
       )}
 
       {/* FAB */}
-      {!detailGroupId && tabKey !== "회사서류" && (
+      {!detailGroupId && tabKey !== "회사서류" && !isMediaArchiveTab && (
         <button
           onClick={() => setUploadSheetOpen(true)}
           className="fixed bottom-6 right-[calc(50%-280px)] w-14 h-14 rounded-full bg-header-navy text-white shadow-lg flex items-center justify-center cursor-pointer z-30 active:scale-90 transition-transform max-[600px]:right-4"

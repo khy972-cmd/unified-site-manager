@@ -1,315 +1,2896 @@
-import { useState, useMemo } from "react";
-import { Search, MapPin, Calendar, ChevronDown, X, Edit2, Trash2, Check, RotateCcw, ChevronRight } from "lucide-react";
+﻿
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import {
+  AlertCircle,
+  Camera,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  ClipboardList,
+  HardHat,
+  Image as ImageIcon,
+  Loader2,
+  Package,
+  Plus,
+  Send,
+  Trash2,
+  Users,
+  X,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { useWorklogs, useUpdateWorklogStatus, useDeleteWorklog } from "@/hooks/useSupabaseWorklogs";
+import { useAuth } from "@/contexts/AuthContext";
 import { useUserRole } from "@/hooks/useUserRole";
+import { useSiteList } from "@/hooks/useSiteList";
+import {
+  useSaveWorklog,
+  useUpdateWorklog,
+  useUpdateWorklogStatus,
+  useWorklogs,
+  type WorklogMutationInput,
+} from "@/hooks/useSupabaseWorklogs";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+} from "@/components/ui/drawer";
+import type {
+  ManpowerItem,
+  MaterialItem,
+  WorkSet,
+  WorklogEntry,
+  WorklogStatus,
+} from "@/lib/worklogStore";
+import {
+  deleteRef,
+  getObjectUrl,
+  isAttachmentRef,
+  revokeObjectUrl,
+  saveFiles,
+  type AttachmentRef,
+  type AttachmentType,
+} from "@/lib/attachmentStore";
+import DocumentViewer from "@/components/viewer/DocumentViewer";
 import PartnerWorklogPage from "@/components/partner/PartnerWorklogPage";
-import type { WorklogEntry, WorklogStatus } from "@/lib/worklogStore";
-import DocumentViewer, { WorklogDocument } from "@/components/viewer/DocumentViewer";
+import DrawingMarkingOverlay from "@/components/overlays/DrawingMarkingOverlay";
 
-const STATUS_CONFIG: Record<WorklogStatus, { label: string; className: string; next?: WorklogStatus }> = {
-  draft: { label: "작성중", className: "bg-blue-50 text-blue-500 border-blue-200", next: "pending" },
-  pending: { label: "요청", className: "bg-indigo-50 text-indigo-500 border-indigo-200", next: "approved" },
-  approved: { label: "승인", className: "bg-muted text-muted-foreground border-border" },
-  rejected: { label: "반려", className: "bg-red-50 text-red-600 border-red-200", next: "draft" },
+const PREDEFINED_WORKERS = ["이현수", "김철수", "박영희", "정유진", "최민수"];
+const MEMBER_CHIPS = ["슬라브", "거더", "기둥", "기타"];
+const PROCESS_CHIPS = ["철근", "형틀", "마감", "기타"];
+const TYPE_CHIPS = ["지하", "지상", "지붕", "기타"];
+const MATERIAL_OPTIONS = ["NPC-1000", "NPC-3000Q", "EP-3020", "무수축몰탈", "프라이머", "기타"];
+
+const HOME_DRAFT_KEY = "inopnc_work_log";
+const MEMO_AUTOSAVE_KEY = "inopnc_worklog_memo_autosave_v1";
+
+type SheetType = "manpower" | "work" | "material" | "media" | null;
+type SaveIntent = "draft" | "pending";
+type WorklogTab = "write" | "view";
+type GalleryKind = AttachmentType | null;
+type LegacyMedia = AttachmentRef & { url?: string };
+
+const STATUS_META: Record<
+  WorklogStatus,
+  {
+    label: string;
+    chipClass: string;
+    cornerClass: string;
+  }
+> = {
+  draft: {
+    label: "작성중",
+    chipClass: "bg-blue-50 text-blue-600 border-blue-200",
+    cornerClass: "bg-blue-500 text-white",
+  },
+  pending: {
+    label: "요청",
+    chipClass: "bg-indigo-50 text-indigo-600 border-indigo-200",
+    cornerClass: "bg-indigo-500 text-white",
+  },
+  approved: {
+    label: "완료",
+    chipClass: "bg-emerald-50 text-emerald-600 border-emerald-200",
+    cornerClass: "bg-muted-foreground text-white",
+  },
+  rejected: {
+    label: "반려",
+    chipClass: "bg-red-50 text-red-600 border-red-200",
+    cornerClass: "bg-red-500 text-white",
+  },
 };
 
-type FilterStatus = "all" | WorklogStatus;
-
-const FILTERS: { key: FilterStatus; label: string }[] = [
-  { key: "all", label: "전체" },
-  { key: "draft", label: "작성중" },
-  { key: "pending", label: "요청" },
-  { key: "approved", label: "승인" },
-  { key: "rejected", label: "반려" },
-];
-
-export default function WorklogPage() {
-  const { isPartner } = useUserRole();
-  if (isPartner) return <PartnerWorklogPage />;
-  return <WorkerWorklogPage />;
+interface WorklogFormState {
+  siteValue: string;
+  siteName: string;
+  workDate: string;
+  dept: string;
+  memo: string;
+  manpower: ManpowerItem[];
+  workSets: WorkSet[];
+  materials: MaterialItem[];
+  photos: LegacyMedia[];
+  drawings: LegacyMedia[];
+  status: WorklogStatus;
 }
 
-function WorkerWorklogPage() {
-  const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<FilterStatus>("all");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [viewerLog, setViewerLog] = useState<WorklogEntry | null>(null);
+interface HomeDraftState {
+  selectedSite?: unknown;
+  siteSearch?: unknown;
+  dept?: unknown;
+  workDate?: unknown;
+  manpowerList?: unknown;
+  workSets?: unknown;
+  materials?: unknown;
+  photos?: unknown;
+  drawings?: unknown;
+}
+
+interface SiteDailyRow {
+  date: string;
+  workSets: WorkSet[];
+  manpower: ManpowerItem[];
+  manpowerHistory: ManpowerItem[];
+  materials: MaterialItem[];
+  assets: {
+    photos: LegacyMedia[];
+    drawings: LegacyMedia[];
+  };
+  status: WorklogStatus;
+  versions: number;
+  memo: string;
+}
+
+interface SiteDailyModel {
+  baseInfo: {
+    siteName: string;
+    dept: string;
+    contractor: string;
+  };
+  dailyData: Record<string, SiteDailyRow>;
+}
+
+interface SiteMediaRow {
+  key: string;
+  date: string;
+  type: AttachmentType;
+  item: LegacyMedia;
+  title: string;
+}
+
+function asString(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function asNumber(value: unknown, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}
+
+function makeRowId() {
+  return Date.now() + Math.floor(Math.random() * 1000);
+}
+
+function createManpower(defaultWorker?: string): ManpowerItem {
+  return {
+    id: makeRowId(),
+    worker: defaultWorker || "",
+    workHours: 1,
+    isCustom: !defaultWorker,
+    locked: false,
+  };
+}
+
+function createWorkSet(): WorkSet {
+  return {
+    id: makeRowId(),
+    member: "",
+    process: "",
+    type: "",
+    location: {
+      block: "",
+      dong: "",
+      floor: "",
+    },
+    customMemberValue: "",
+    customProcessValue: "",
+    customTypeValue: "",
+  };
+}
+
+function createMaterial(): MaterialItem {
+  return {
+    id: makeRowId(),
+    name: "",
+    qty: 0,
+  };
+}
+
+function cloneLocation(location: WorkSet["location"] | undefined): WorkSet["location"] {
+  return {
+    block: location?.block || "",
+    dong: location?.dong || "",
+    floor: location?.floor || "",
+  };
+}
+
+function createDefaultForm(today: string): WorklogFormState {
+  return {
+    siteValue: "",
+    siteName: "",
+    workDate: today,
+    dept: "",
+    memo: "",
+    manpower: [createManpower(PREDEFINED_WORKERS[0])],
+    workSets: [createWorkSet()],
+    materials: [],
+    photos: [],
+    drawings: [],
+    status: "draft",
+  };
+}
+
+function cloneManpowerRows(rows: ManpowerItem[]) {
+  return rows.map((item) => ({
+    ...item,
+    id: makeRowId(),
+    worker: asString(item.worker),
+    workHours: asNumber(item.workHours, 0),
+  }));
+}
+
+function cloneWorkSets(rows: WorkSet[]) {
+  return rows.map((item) => ({
+    ...item,
+    id: makeRowId(),
+    member: asString(item.member),
+    process: asString(item.process),
+    type: asString(item.type),
+    location: cloneLocation(item.location),
+    customMemberValue: asString(item.customMemberValue),
+    customProcessValue: asString(item.customProcessValue),
+    customTypeValue: asString(item.customTypeValue),
+  }));
+}
+
+function cloneMaterials(rows: MaterialItem[]) {
+  return rows.map((item) => ({
+    ...item,
+    id: makeRowId(),
+    name: asString(item.name),
+    qty: Math.max(0, asNumber(item.qty, 0)),
+  }));
+}
+
+function normalizePhotoStatus(status: string) {
+  const value = status.trim().toLowerCase();
+  if (value === "before" || value === "보수전") return "before";
+  if (value === "receipt" || value === "확인서" || value === "confirm" || value === "confirmation") return "receipt";
+  return "after";
+}
+
+function normalizeDrawingStatus(status: string) {
+  const value = status.trim().toLowerCase();
+  if (value === "done" || value === "완료도면" || value === "완료") return "done";
+  return "progress";
+}
+
+function normalizeMediaStatus(type: AttachmentType, status: string) {
+  return type === "photo" ? normalizePhotoStatus(status) : normalizeDrawingStatus(status);
+}
+
+function cloneMediaRows(rows: LegacyMedia[]) {
+  return rows.map((item) => ({
+    ...item,
+    id: asString(item.id) || `legacy_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    type: item.type === "drawing" ? "drawing" : "photo",
+    status: normalizeMediaStatus(item.type === "drawing" ? "drawing" : "photo", asString(item.status, "after")),
+    timestamp: asString(item.timestamp, new Date().toISOString()),
+  }));
+}
+
+function getRowPhotos(row: SiteDailyRow) {
+  return Array.isArray(row.assets?.photos) ? row.assets.photos : [];
+}
+
+function getRowDrawings(row: SiteDailyRow) {
+  return Array.isArray(row.assets?.drawings) ? row.assets.drawings : [];
+}
+
+function isReceiptPhoto(item: LegacyMedia) {
+  return normalizePhotoStatus(asString(item.status, "after")) === "receipt";
+}
+
+function getPhotoOnlyItems(rows: LegacyMedia[]) {
+  return rows.filter((item) => !isReceiptPhoto(item));
+}
+
+function getReceiptItems(rows: LegacyMedia[]) {
+  return rows.filter((item) => isReceiptPhoto(item));
+}
+
+function rowPhotoCount(row: SiteDailyRow) {
+  return getPhotoOnlyItems(getRowPhotos(row)).length;
+}
+
+function rowReceiptCount(row: SiteDailyRow) {
+  return getReceiptItems(getRowPhotos(row)).length;
+}
+
+function photoStatusLabel(status: string) {
+  const value = normalizePhotoStatus(status);
+  if (value === "before") return "보수전";
+  if (value === "receipt") return "확인서";
+  return "보수후";
+}
+
+function drawingStatusLabel(status: string) {
+  return normalizeDrawingStatus(status) === "done" ? "완료도면" : "진행도면";
+}
+function parseHomeDraft(today: string): WorklogFormState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(HOME_DRAFT_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as HomeDraftState;
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const nowIso = new Date().toISOString();
+    const base = createDefaultForm(today);
+
+    const manpower: ManpowerItem[] = Array.isArray(parsed.manpowerList)
+      ? parsed.manpowerList
+          .map((item) => {
+            if (!item || typeof item !== "object") return null;
+            const row = item as Record<string, unknown>;
+            return {
+              id: makeRowId(),
+              worker: asString(row.worker),
+              workHours: asNumber(row.workHours, 1),
+              isCustom: !!row.isCustom,
+              locked: !!row.locked,
+            } as ManpowerItem;
+          })
+          .filter(Boolean) as ManpowerItem[]
+      : [];
+
+    const workSets: WorkSet[] = Array.isArray(parsed.workSets)
+      ? parsed.workSets
+          .map((item) => {
+            if (!item || typeof item !== "object") return null;
+            const row = item as Record<string, unknown>;
+            const location =
+              row.location && typeof row.location === "object" ? (row.location as Record<string, unknown>) : {};
+            return {
+              id: makeRowId(),
+              member: asString(row.member),
+              process: asString(row.process),
+              type: asString(row.type),
+              location: {
+                block: asString(location.block),
+                dong: asString(location.dong),
+                floor: asString(location.floor),
+              },
+              customMemberValue: asString(row.customMemberValue),
+              customProcessValue: asString(row.customProcessValue),
+              customTypeValue: asString(row.customTypeValue),
+            } as WorkSet;
+          })
+          .filter(Boolean) as WorkSet[]
+      : [];
+
+    const materials: MaterialItem[] = Array.isArray(parsed.materials)
+      ? parsed.materials
+          .map((item) => {
+            if (!item || typeof item !== "object") return null;
+            const row = item as Record<string, unknown>;
+            const name = asString(row.name).trim();
+            if (!name) return null;
+            return {
+              id: makeRowId(),
+              name,
+              qty: Math.max(0, asNumber(row.qty, 0)),
+            } as MaterialItem;
+          })
+          .filter(Boolean) as MaterialItem[]
+      : [];
+
+    const photos: LegacyMedia[] = Array.isArray(parsed.photos)
+      ? parsed.photos
+          .map((item, index) => {
+            if (!item || typeof item !== "object") return null;
+            const row = item as Record<string, unknown>;
+            const img = asString(row?.img || row?.url).trim();
+            if (!img) return null;
+            const statusRaw = asString(row.status || row.desc || row.badge, "after");
+            return {
+              id: `home_photo_${Date.now()}_${index}`,
+              type: "photo",
+              status: normalizePhotoStatus(statusRaw),
+              timestamp: nowIso,
+              url: img,
+            } as LegacyMedia;
+          })
+          .filter(Boolean) as LegacyMedia[]
+      : [];
+
+    const drawings: LegacyMedia[] = Array.isArray(parsed.drawings)
+      ? parsed.drawings
+          .map((item, index) => {
+            const row = item && typeof item === "object" ? (item as Record<string, unknown>) : null;
+            const url = asString(row?.img || row?.url || item).trim();
+            if (!url) return null;
+            const statusRaw = asString(row?.status || row?.desc || row?.stage, "progress");
+            return {
+              id: `home_drawing_${Date.now()}_${index}`,
+              type: "drawing",
+              status: normalizeDrawingStatus(statusRaw),
+              timestamp: nowIso,
+              url,
+            } as LegacyMedia;
+          })
+          .filter(Boolean) as LegacyMedia[]
+      : [];
+
+    return {
+      ...base,
+      siteValue: asString(parsed.selectedSite),
+      siteName: asString(parsed.siteSearch),
+      dept: asString(parsed.dept),
+      workDate: asString(parsed.workDate, today),
+      manpower: manpower.length > 0 ? manpower : base.manpower,
+      workSets: workSets.length > 0 ? workSets : base.workSets,
+      materials,
+      photos,
+      drawings,
+      status: "draft",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function toFormState(log: WorklogEntry): WorklogFormState {
+  const manpower = Array.isArray(log.manpower)
+    ? log.manpower.map((item) => ({
+        ...item,
+        id: Number(item.id) || makeRowId(),
+        worker: item.worker || "",
+        workHours: Number(item.workHours || 0),
+      }))
+    : [];
+
+  const workSets = Array.isArray(log.workSets)
+    ? log.workSets.map((item) => ({
+        ...item,
+        id: Number(item.id) || makeRowId(),
+        member: item.member || "",
+        process: item.process || "",
+        type: item.type || "",
+        location: cloneLocation(item.location),
+        customMemberValue: item.customMemberValue || "",
+        customProcessValue: item.customProcessValue || "",
+        customTypeValue: item.customTypeValue || "",
+      }))
+    : [];
+
+  const materials = Array.isArray(log.materials)
+    ? log.materials.map((item) => ({
+        ...item,
+        id: Number(item.id) || makeRowId(),
+        name: item.name || "",
+        qty: Number(item.qty || 0),
+      }))
+    : [];
+
+  return {
+    siteValue: log.siteValue || "",
+    siteName: log.siteName || "",
+    workDate: log.workDate,
+    dept: log.dept || "",
+    memo: log.weather || "",
+    manpower: manpower.length > 0 ? manpower : [createManpower()],
+    workSets: workSets.length > 0 ? workSets : [createWorkSet()],
+    materials,
+    photos: cloneMediaRows((log.photos || []) as LegacyMedia[]),
+    drawings: cloneMediaRows((log.drawings || []) as LegacyMedia[]),
+    status: log.status,
+  };
+}
+
+function siteKey(siteValue: string, siteName: string) {
+  return (siteValue || siteName || "").trim().toLowerCase();
+}
+
+function isSameSite(log: WorklogEntry, siteValue: string, siteName: string) {
+  const left = siteKey(log.siteValue, log.siteName);
+  const right = siteKey(siteValue, siteName);
+  return !!left && !!right && left === right;
+}
+
+function resolvedValue(value: string, customValue: string) {
+  const trimmed = value.trim();
+  if (trimmed === "기타") return customValue.trim();
+  return trimmed;
+}
+
+function hasFilledManpower(rows: ManpowerItem[]) {
+  return rows.some((row) => row.worker.trim() && Number(row.workHours) > 0);
+}
+
+function hasFilledWorkSets(rows: WorkSet[]) {
+  return rows.some(
+    (row) => resolvedValue(row.member || "", row.customMemberValue || "") && resolvedValue(row.process || "", row.customProcessValue || ""),
+  );
+}
+
+function hasFilledMaterials(rows: MaterialItem[]) {
+  return rows.some((row) => row.name.trim() && Number(row.qty) > 0);
+}
+
+function mergeMissingFormValues(primary: WorklogFormState, fallback: WorklogFormState | null | undefined): WorklogFormState {
+  if (!fallback) return primary;
+
+  return {
+    ...primary,
+    siteValue: primary.siteValue || fallback.siteValue,
+    siteName: primary.siteName || fallback.siteName,
+    workDate: primary.workDate || fallback.workDate,
+    dept: primary.dept || fallback.dept,
+    memo: primary.memo || fallback.memo,
+    manpower: hasFilledManpower(primary.manpower) ? primary.manpower : cloneManpowerRows(fallback.manpower),
+    workSets: hasFilledWorkSets(primary.workSets) ? primary.workSets : cloneWorkSets(fallback.workSets),
+    materials: hasFilledMaterials(primary.materials) ? primary.materials : cloneMaterials(fallback.materials),
+    photos: primary.photos.length > 0 ? primary.photos : cloneMediaRows(fallback.photos),
+    drawings: primary.drawings.length > 0 ? primary.drawings : cloneMediaRows(fallback.drawings),
+  };
+}
+
+function statusProgressStep(status: WorklogStatus) {
+  if (status === "rejected") return 3;
+  if (status === "approved") return 3;
+  if (status === "pending") return 2;
+  return 1;
+}
+
+function compactPendingLabel(label: string) {
+  if (label === "현장명") return "현장";
+  if (label === "작업일자") return "날짜";
+  if (label === "투입 1명 이상") return "투입";
+  if (label === "작업 1건 이상") return "작업";
+  if (label === "사진 또는 도면 1건 이상") return "사진/도면";
+  return label;
+}
+
+function getLegacyUrl(item: LegacyMedia) {
+  return typeof item?.url === "string" ? item.url : "";
+}
+
+function mediaItemKey(item: LegacyMedia, index: number) {
+  return item.id || `legacy_${index}`;
+}
+
+function countTotalHours(rows: ManpowerItem[]) {
+  return rows.reduce((sum, row) => sum + (Number(row.workHours) || 0), 0);
+}
+
+function summarizeWork(workSets: WorkSet[]) {
+  if (workSets.length === 0) return "입력된 작업이 없습니다.";
+  const first = workSets[0];
+  const member = resolvedValue(first.member, first.customMemberValue) || "-";
+  const process = resolvedValue(first.process, first.customProcessValue) || "-";
+  const area = [first.location.block, first.location.dong, first.location.floor]
+    .map((row) => row.trim())
+    .filter(Boolean)
+    .join(" ");
+
+  const base = area ? `${member} / ${process} (${area})` : `${member} / ${process}`;
+  return workSets.length > 1 ? `${base} 외 ${workSets.length - 1}건` : base;
+}
+
+function summarizeMaterials(materials: MaterialItem[]) {
+  if (materials.length === 0) return "입력된 자재가 없습니다.";
+  const first = materials[0];
+  const base = `${first.name || "-"} (${Number(first.qty || 0)})`;
+  return materials.length > 1 ? `${base} 외 ${materials.length - 1}건` : base;
+}
+
+function normalizeText(value: string) {
+  return value.toLowerCase().trim();
+}
+function buildMemoStorageKey(siteValue: string, siteName: string, date: string) {
+  return `${siteKey(siteValue, siteName)}|${date}`;
+}
+
+function readMemoAutosaveMap() {
+  if (typeof window === "undefined") return {} as Record<string, string>;
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(MEMO_AUTOSAVE_KEY) || "{}");
+    if (!raw || typeof raw !== "object") return {} as Record<string, string>;
+    return raw as Record<string, string>;
+  } catch {
+    return {} as Record<string, string>;
+  }
+}
+
+function writeMemoAutosaveMap(next: Record<string, string>) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(MEMO_AUTOSAVE_KEY, JSON.stringify(next));
+}
+
+function getMemoAutosave(siteValue: string, siteName: string, date: string) {
+  if (!date) return "";
+  const key = buildMemoStorageKey(siteValue, siteName, date);
+  return readMemoAutosaveMap()[key] || "";
+}
+
+function setMemoAutosave(siteValue: string, siteName: string, date: string, memo: string) {
+  if (!date) return;
+  const key = buildMemoStorageKey(siteValue, siteName, date);
+  const map = readMemoAutosaveMap();
+  const trimmed = memo.trim();
+  if (trimmed) {
+    map[key] = memo;
+  } else {
+    delete map[key];
+  }
+  writeMemoAutosaveMap(map);
+}
+
+function clearMemoAutosave(siteValue: string, siteName: string, date: string) {
+  if (!date) return;
+  const key = buildMemoStorageKey(siteValue, siteName, date);
+  const map = readMemoAutosaveMap();
+  if (key in map) {
+    delete map[key];
+    writeMemoAutosaveMap(map);
+  }
+}
+
+function buildSiteDailyRow(log: WorklogEntry): SiteDailyRow {
+  const manpowerRows = cloneManpowerRows(Array.isArray(log.manpower) ? log.manpower : []);
+  return {
+    date: log.workDate,
+    workSets: cloneWorkSets(Array.isArray(log.workSets) ? log.workSets : []),
+    manpower: manpowerRows,
+    manpowerHistory: cloneManpowerRows(manpowerRows),
+    materials: cloneMaterials(Array.isArray(log.materials) ? log.materials : []),
+    assets: {
+      photos: cloneMediaRows((log.photos || []) as LegacyMedia[]),
+      drawings: cloneMediaRows((log.drawings || []) as LegacyMedia[]),
+    },
+    status: log.status,
+    versions: Math.max(1, Number(log.version || 1)),
+    memo: log.weather || "",
+  };
+}
+
+function buildSiteDailyModel(params: {
+  siteName: string;
+  dept: string;
+  contractor: string;
+  logs: WorklogEntry[];
+}): SiteDailyModel {
+  const { siteName, dept, contractor, logs } = params;
+  const dailyData: Record<string, SiteDailyRow> = {};
+
+  logs.forEach((log) => {
+    const date = log.workDate;
+    if (!date) return;
+    const existing = dailyData[date];
+    if (!existing || Number(log.version || 0) >= Number(existing.versions || 0)) {
+      dailyData[date] = buildSiteDailyRow(log);
+    }
+  });
+
+  return {
+    baseInfo: {
+      siteName: siteName || "",
+      dept: dept || "",
+      contractor: contractor || dept || "",
+    },
+    dailyData,
+  };
+}
+
+function toFormStateFromSiteDaily(params: {
+  siteValue: string;
+  siteName: string;
+  dept: string;
+  row: SiteDailyRow;
+}): WorklogFormState {
+  const { siteValue, siteName, dept, row } = params;
+  const manpowerSeed =
+    Array.isArray(row.manpower) && row.manpower.length > 0
+      ? row.manpower
+      : Array.isArray(row.manpowerHistory)
+        ? row.manpowerHistory
+        : [];
+
+  return {
+    siteValue,
+    siteName,
+    workDate: row.date,
+    dept,
+    memo: row.memo || "",
+    manpower: manpowerSeed.length > 0 ? cloneManpowerRows(manpowerSeed) : [createManpower()],
+    workSets: row.workSets.length > 0 ? cloneWorkSets(row.workSets) : [createWorkSet()],
+    materials: cloneMaterials(row.materials || []),
+    photos: cloneMediaRows(getRowPhotos(row)),
+    drawings: cloneMediaRows(getRowDrawings(row)),
+    status: row.status || "draft",
+  };
+}
+
+export default function WorklogPage() {
+  const { user } = useAuth();
+  const { isPartner, isAdmin, loading: roleLoading } = useUserRole();
+  const metadataNameCandidates = [user?.user_metadata?.name, user?.user_metadata?.full_name, user?.user_metadata?.nickname];
+  const metadataWriterName =
+    metadataNameCandidates.find((value) => typeof value === "string" && value.trim()) as string | undefined;
+  const writerName = metadataWriterName?.trim() || user?.email?.split("@")[0] || "미지정";
+
+  if (roleLoading) {
+    return (
+      <div className="py-20 flex items-center justify-center text-text-sub">
+        <Loader2 className="w-8 h-8 animate-spin" />
+      </div>
+    );
+  }
+
+  if (isPartner) return <PartnerWorklogPage />;
+  return <WorkerWorklogPage userId={user?.id ?? null} isAdmin={isAdmin} writerName={writerName} />;
+}
+
+function WorkerWorklogPage({ userId, isAdmin, writerName }: { userId: string | null; isAdmin: boolean; writerName: string }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
   const { data: logs = [], isLoading } = useWorklogs();
-  const updateStatus = useUpdateWorklogStatus();
-  const deleteWl = useDeleteWorklog();
+  const { data: siteList = [] } = useSiteList();
 
-  const filtered = useMemo(() =>
-    logs
-      .filter(l => filter === "all" || l.status === filter)
-      .filter(l =>
-        l.siteName.toLowerCase().includes(search.toLowerCase()) ||
-        l.workDate.includes(search) ||
-        l.workSets?.some(ws => {
-          const m = ws.member === "기타" ? ws.customMemberValue : ws.member;
-          const p = ws.process === "기타" ? ws.customProcessValue : ws.process;
-          return (m && m.includes(search)) || (p && p.includes(search));
-        })
-      )
-      .sort((a, b) => b.workDate.localeCompare(a.workDate) || b.createdAt.localeCompare(a.createdAt)),
-    [logs, filter, search]
+  const saveMutation = useSaveWorklog();
+  const updateMutation = useUpdateWorklog();
+  const statusMutation = useUpdateWorklogStatus();
+
+  const [form, setForm] = useState<WorklogFormState>(() => mergeMissingFormValues(createDefaultForm(today), parseHomeDraft(today)));
+  const [editingLogId, setEditingLogId] = useState<string | null>(null);
+  const [sheet, setSheet] = useState<SheetType>(null);
+  const [activeTab, setActiveTab] = useState<WorklogTab>("write");
+  const [galleryKind, setGalleryKind] = useState<GalleryKind>(null);
+  const [logListOpen, setLogListOpen] = useState(false);
+
+  const [siteSearch, setSiteSearch] = useState(() => parseHomeDraft(today)?.siteName || "");
+  const [showSiteDropdown, setShowSiteDropdown] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [previewMap, setPreviewMap] = useState<Record<string, string>>({});
+  const [materialSelect, setMaterialSelect] = useState(MATERIAL_OPTIONS[0]);
+  const [materialQty, setMaterialQty] = useState("");
+  const [isMaterialDirect, setIsMaterialDirect] = useState(false);
+  const [customMaterialValue, setCustomMaterialValue] = useState("");
+  const [viewer, setViewer] = useState<{
+    open: boolean;
+    url: string;
+    title: string;
+  }>({ open: false, url: "", title: "" });
+  const [marking, setMarking] = useState<{
+    open: boolean;
+    index: number;
+    imageSrc: string;
+  }>({ open: false, index: -1, imageSrc: "" });
+
+  const loadKeyRef = useRef("");
+  const activeMediaIdsRef = useRef<string[]>([]);
+
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const drawingInputRef = useRef<HTMLInputElement | null>(null);
+  const receiptInputRef = useRef<HTMLInputElement | null>(null);
+
+  const busy = isSaving || saveMutation.isPending || updateMutation.isPending || statusMutation.isPending;
+
+  const sortedLogs = useMemo(
+    () =>
+      [...logs].sort((a, b) => {
+        if (a.workDate !== b.workDate) return b.workDate.localeCompare(a.workDate);
+        const aUpdated = a.updatedAt || a.createdAt;
+        const bUpdated = b.updatedAt || b.createdAt;
+        if (aUpdated !== bUpdated) return bUpdated.localeCompare(aUpdated);
+        return b.version - a.version;
+      }),
+    [logs],
   );
 
-  const statusCounts = useMemo(() => ({
-    all: logs.length,
-    draft: logs.filter(l => l.status === "draft").length,
-    pending: logs.filter(l => l.status === "pending").length,
-    approved: logs.filter(l => l.status === "approved").length,
-    rejected: logs.filter(l => l.status === "rejected").length,
-  }), [logs]);
+  const filteredSiteOptions = useMemo(() => {
+    const q = normalizeText(siteSearch);
+    if (!q) return siteList.slice(0, 30);
+    return siteList.filter((site) => normalizeText(site.site_name).includes(q)).slice(0, 40);
+  }, [siteList, siteSearch]);
 
-  const handleStatusChange = (id: string, newStatus: WorklogStatus) => {
-    updateStatus.mutate({ id, status: newStatus }, {
-      onSuccess: () => toast.success(`상태가 "${STATUS_CONFIG[newStatus].label}"(으)로 변경되었습니다`),
+  const selectedSite = useMemo(() => {
+    if (!form.siteValue && !form.siteName) return undefined;
+    return (
+      siteList.find((site) => site.site_id === form.siteValue) ||
+      siteList.find((site) => site.site_name === form.siteName)
+    );
+  }, [siteList, form.siteValue, form.siteName]);
+
+  const selectedSiteLogs = useMemo(
+    () => sortedLogs.filter((log) => isSameSite(log, form.siteValue, form.siteName)),
+    [sortedLogs, form.siteValue, form.siteName],
+  );
+
+  const selectedSiteLogMap = useMemo(() => {
+    const map = new Map<string, WorklogEntry>();
+    selectedSiteLogs.forEach((entry) => {
+      if (!entry.workDate) return;
+      if (!map.has(entry.workDate)) map.set(entry.workDate, entry);
     });
+    return map;
+  }, [selectedSiteLogs]);
+
+  const matchingLog = useMemo(() => {
+    if (!form.workDate) return undefined;
+    return selectedSiteLogMap.get(form.workDate);
+  }, [selectedSiteLogMap, form.workDate]);
+
+  const isOwner = (entry: WorklogEntry) => !entry.createdBy || !userId || entry.createdBy === userId;
+  const canRequestEntry = (entry: WorklogEntry) => (isAdmin || isOwner(entry)) && (entry.status === "draft" || entry.status === "rejected");
+  const canWithdrawEntry = (entry: WorklogEntry) => (isAdmin || isOwner(entry)) && entry.status === "pending";
+  const canApproveEntry = (entry: WorklogEntry) => isAdmin && entry.status === "pending";
+
+  const previousSiteLog = useMemo(() => {
+    if (!form.workDate) return undefined;
+    return selectedSiteLogs.find((entry) => entry.workDate < form.workDate);
+  }, [selectedSiteLogs, form.workDate]);
+
+  const homeDraftSnapshot = useMemo(() => parseHomeDraft(today), [today]);
+
+  const affiliationLabel = (selectedSite?.dept || form.dept || "").trim() || "미지정";
+  const hasSiteName = !!form.siteName.trim();
+  const hasDate = !!form.workDate;
+  const manpowerValidCount = form.manpower.filter((row) => row.worker.trim() && Number(row.workHours) > 0).length;
+  const workValidCount = form.workSets.filter(
+    (row) => resolvedValue(row.member, row.customMemberValue) && resolvedValue(row.process, row.customProcessValue),
+  ).length;
+  const receiptCount = form.photos.filter((item) => isReceiptPhoto(item)).length;
+  const photoCount = form.photos.length - receiptCount;
+  const mediaRequiredCount = photoCount + form.drawings.length;
+  const isReadyToSubmit = hasSiteName && hasDate && manpowerValidCount > 0 && workValidCount > 0 && mediaRequiredCount > 0;
+
+  const pendingItems = [
+    !hasSiteName ? "현장명" : "",
+    !hasDate ? "작업일자" : "",
+    manpowerValidCount === 0 ? "투입 1명 이상" : "",
+    workValidCount === 0 ? "작업 1건 이상" : "",
+    mediaRequiredCount === 0 ? "사진 또는 도면 1건 이상" : "",
+  ].filter(Boolean);
+  const pendingInline = pendingItems.map(compactPendingLabel).join(" · ");
+
+  const manpowerSummary =
+    manpowerValidCount > 0
+      ? `${manpowerValidCount}명 / 총 ${countTotalHours(form.manpower).toFixed(1)}공수`
+      : "입력된 투입이 없습니다.";
+  const workSummary = summarizeWork(form.workSets.filter((row) => resolvedValue(row.member, row.customMemberValue)));
+  const materialSummary = summarizeMaterials(form.materials.filter((row) => row.name.trim() && Number(row.qty) > 0));
+  const mediaSummary =
+    mediaRequiredCount > 0 || receiptCount > 0
+      ? `사진 ${photoCount}건 · 도면 ${form.drawings.length}건 · 확인서 ${receiptCount}건`
+      : "사진 또는 도면을 등록하세요.";
+  const headerInlineSummary = `작성자 ${writerName} · 작업 ${workValidCount}건 · 사진 ${photoCount} · 도면 ${form.drawings.length} · 확인서 ${receiptCount}`;
+  const photoRowsForEdit = useMemo(
+    () => form.photos.map((item, index) => ({ item, index })),
+    [form.photos],
+  );
+  const normalPhotoRowsForEdit = useMemo(
+    () => photoRowsForEdit.filter((row) => !isReceiptPhoto(row.item)),
+    [photoRowsForEdit],
+  );
+  const receiptRowsForEdit = useMemo(
+    () => photoRowsForEdit.filter((row) => isReceiptPhoto(row.item)),
+    [photoRowsForEdit],
+  );
+
+  const currentStatus = matchingLog?.status || form.status;
+
+  const siteDailyModel = useMemo(() => {
+    const model = buildSiteDailyModel({
+      siteName: form.siteName,
+      dept: form.dept,
+      contractor: affiliationLabel,
+      logs: selectedSiteLogs,
+    });
+
+    if (hasSiteName && hasDate) {
+      const manpowerRows = cloneManpowerRows(form.manpower);
+      model.dailyData[form.workDate] = {
+        date: form.workDate,
+        workSets: cloneWorkSets(form.workSets),
+        manpower: manpowerRows,
+        manpowerHistory: cloneManpowerRows(manpowerRows),
+        materials: cloneMaterials(form.materials),
+        assets: {
+          photos: cloneMediaRows(form.photos),
+          drawings: cloneMediaRows(form.drawings),
+        },
+        status: currentStatus,
+        versions: matchingLog?.version || 1,
+        memo: form.memo || "",
+      };
+    }
+
+    return model;
+  }, [
+    affiliationLabel,
+    currentStatus,
+    form.dept,
+    form.drawings,
+    form.manpower,
+    form.materials,
+    form.memo,
+    form.photos,
+    form.siteName,
+    form.workDate,
+    form.workSets,
+    hasDate,
+    hasSiteName,
+    matchingLog?.version,
+    selectedSiteLogs,
+  ]);
+  const dailyRows = useMemo(
+    () =>
+      Object.values(siteDailyModel.dailyData).sort((a, b) => {
+        if (a.date !== b.date) return b.date.localeCompare(a.date);
+        return Number(b.versions || 0) - Number(a.versions || 0);
+      }),
+    [siteDailyModel.dailyData],
+  );
+
+  const sitePhotoRows = useMemo(() => {
+    const list: SiteMediaRow[] = [];
+    dailyRows.forEach((row) => {
+      getPhotoOnlyItems(getRowPhotos(row)).forEach((item, index) => {
+        list.push({
+          key: `site_photo_${row.date}_${mediaItemKey(item, index)}`,
+          date: row.date,
+          type: "photo",
+          item,
+          title: `${form.siteName || row.date} 사진 ${index + 1}`,
+        });
+      });
+    });
+    return list;
+  }, [dailyRows, form.siteName]);
+
+  const siteDrawingRows = useMemo(() => {
+    const list: SiteMediaRow[] = [];
+    dailyRows.forEach((row) => {
+      getRowDrawings(row).forEach((item, index) => {
+        list.push({
+          key: `site_drawing_${row.date}_${mediaItemKey(item, index)}`,
+          date: row.date,
+          type: "drawing",
+          item,
+          title: `${form.siteName || row.date} 도면 ${index + 1}`,
+        });
+      });
+    });
+    return list;
+  }, [dailyRows, form.siteName]);
+
+  const photoGroups = useMemo(() => {
+    const map = new Map<string, SiteMediaRow[]>();
+    sitePhotoRows.forEach((row) => {
+      if (!map.has(row.date)) map.set(row.date, []);
+      map.get(row.date)!.push(row);
+    });
+    return [...map.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([date, items]) => ({ date, items }));
+  }, [sitePhotoRows]);
+
+  const drawingGroups = useMemo(() => {
+    const map = new Map<string, SiteMediaRow[]>();
+    siteDrawingRows.forEach((row) => {
+      if (!map.has(row.date)) map.set(row.date, []);
+      map.get(row.date)!.push(row);
+    });
+    return [...map.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([date, items]) => ({ date, items }));
+  }, [siteDrawingRows]);
+
+  const formMediaEntries = useMemo(
+    () => [
+      ...form.photos.map((item, index) => ({ key: `photo_${mediaItemKey(item, index)}`, item })),
+      ...form.drawings.map((item, index) => ({ key: `drawing_${mediaItemKey(item, index)}`, item })),
+    ],
+    [form.photos, form.drawings],
+  );
+
+  const previewTargets = useMemo(
+    () => [
+      ...formMediaEntries,
+      ...sitePhotoRows.map((row) => ({ key: row.key, item: row.item })),
+      ...siteDrawingRows.map((row) => ({ key: row.key, item: row.item })),
+    ],
+    [formMediaEntries, sitePhotoRows, siteDrawingRows],
+  );
+
+  useEffect(() => {
+    const focusId = searchParams.get("focus");
+    if (!focusId) return;
+
+    const target = sortedLogs.find((log) => log.id === focusId);
+    if (target) {
+      const next = toFormState(target);
+      const memoDraft = getMemoAutosave(target.siteValue, target.siteName, target.workDate);
+      if (!next.memo && memoDraft) next.memo = memoDraft;
+      setForm(next);
+      setEditingLogId(target.id);
+      setSiteSearch(target.siteName || target.siteValue);
+      setActiveTab("write");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("focus");
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, setSearchParams, sortedLogs]);
+
+  useEffect(() => {
+    if (!hasSiteName || !hasDate) return;
+
+    const key = `${form.siteValue}|${form.siteName}|${form.workDate}|${matchingLog?.id || "new"}|${matchingLog?.version || 0}`;
+    if (loadKeyRef.current === key) return;
+    loadKeyRef.current = key;
+
+    const currentSiteKey = siteKey(form.siteValue, form.siteName);
+    const draftSiteKey = homeDraftSnapshot ? siteKey(homeDraftSnapshot.siteValue, homeDraftSnapshot.siteName) : "";
+    const draftMatchesSite = !!currentSiteKey && !!draftSiteKey && currentSiteKey === draftSiteKey;
+
+    if (matchingLog) {
+      const next = toFormState(matchingLog);
+      const memoDraft = getMemoAutosave(form.siteValue, form.siteName, form.workDate);
+      if (!next.memo && memoDraft) next.memo = memoDraft;
+      setForm(next);
+      setEditingLogId(matchingLog.id);
+      setSiteSearch(matchingLog.siteName || matchingLog.siteValue);
+      return;
+    }
+
+    let seeded = {
+      ...createDefaultForm(today),
+      siteValue: form.siteValue,
+      siteName: form.siteName,
+      workDate: form.workDate,
+      dept: form.dept,
+    };
+
+    if (draftMatchesSite) seeded = mergeMissingFormValues(seeded, homeDraftSnapshot);
+    if (previousSiteLog) seeded = mergeMissingFormValues(seeded, toFormState(previousSiteLog));
+
+    const memoDraft = getMemoAutosave(form.siteValue, form.siteName, form.workDate);
+    if (!seeded.memo && memoDraft) seeded.memo = memoDraft;
+
+    seeded.status = "draft";
+    setForm(seeded);
+    setEditingLogId(null);
+  }, [
+    form.dept,
+    form.siteName,
+    form.siteValue,
+    form.workDate,
+    hasDate,
+    hasSiteName,
+    homeDraftSnapshot,
+    matchingLog,
+    previousSiteLog,
+    today,
+  ]);
+
+  useEffect(() => {
+    if (!hasSiteName || !hasDate) return;
+    const timer = window.setTimeout(() => {
+      setMemoAutosave(form.siteValue, form.siteName, form.workDate, form.memo || "");
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [form.memo, form.siteName, form.siteValue, form.workDate, hasDate, hasSiteName]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPreviewMap() {
+      const next: Record<string, string> = {};
+      const ids = new Set<string>();
+
+      for (const row of previewTargets) {
+        const legacy = getLegacyUrl(row.item);
+        if (legacy) {
+          next[row.key] = legacy;
+          continue;
+        }
+
+        if (!row.item.id) continue;
+        ids.add(row.item.id);
+        const url = await getObjectUrl(row.item.id);
+        if (url) {
+          next[row.key] = url;
+        }
+      }
+
+      if (!cancelled) {
+        activeMediaIdsRef.current = [...ids];
+        setPreviewMap(next);
+      }
+    }
+
+    loadPreviewMap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [previewTargets]);
+
+  useEffect(
+    () => () => {
+      activeMediaIdsRef.current.forEach((id) => revokeObjectUrl(id));
+    },
+    [],
+  );
+
+  const selectSite = (siteId: string, siteName: string, dept?: string) => {
+    setForm((prev) => ({
+      ...prev,
+      siteValue: siteId,
+      siteName,
+      dept: dept || prev.dept,
+    }));
+    setSiteSearch(siteName);
+    setShowSiteDropdown(false);
+    loadKeyRef.current = "";
   };
 
-  const handleDelete = (id: string) => {
-    if (!window.confirm("이 작업일지를 삭제하시겠습니까?")) return;
-    deleteWl.mutate(id, {
-      onSuccess: () => {
-        setExpandedId(null);
-        toast.success("작업일지가 삭제되었습니다");
-      },
-    });
+  const resetCurrentForm = () => {
+    setForm((prev) => ({
+      ...createDefaultForm(today),
+      siteValue: prev.siteValue,
+      siteName: prev.siteName,
+      workDate: prev.workDate,
+      dept: prev.dept,
+      memo: "",
+    }));
+    setEditingLogId(null);
+    loadKeyRef.current = "";
   };
 
-  const getTotalHours = (entry: WorklogEntry) =>
-    entry.manpower?.reduce((s, m) => s + (m.workHours || 0), 0) || 0;
+  const loadEntryToForm = (entry: WorklogEntry) => {
+    const next = toFormState(entry);
+    const memoDraft = getMemoAutosave(entry.siteValue, entry.siteName, entry.workDate);
+    if (!next.memo && memoDraft) next.memo = memoDraft;
+
+    setForm(next);
+    setEditingLogId(entry.id);
+    setSiteSearch(entry.siteName || entry.siteValue);
+    setActiveTab("write");
+    setLogListOpen(false);
+    setGalleryKind(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const moveToDate = (date: string) => {
+    const existing = selectedSiteLogMap.get(date);
+    if (existing) {
+      loadEntryToForm(existing);
+      return;
+    }
+
+    const row = siteDailyModel.dailyData[date];
+    if (!row) return;
+
+    const next = toFormStateFromSiteDaily({
+      siteValue: form.siteValue,
+      siteName: form.siteName,
+      dept: form.dept,
+      row,
+    });
+
+    const memoDraft = getMemoAutosave(form.siteValue, form.siteName, date);
+    if (!next.memo && memoDraft) next.memo = memoDraft;
+
+    setForm(next);
+    setEditingLogId(null);
+    setActiveTab("write");
+    setLogListOpen(false);
+    setGalleryKind(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const updateStatus = async (entry: WorklogEntry, nextStatus: WorklogStatus) => {
+    if (busy) return;
+    try {
+      await statusMutation.mutateAsync({ id: entry.id, status: nextStatus });
+      if (editingLogId === entry.id) {
+        setForm((prev) => ({ ...prev, status: nextStatus }));
+      }
+      toast.success(`상태를 ${STATUS_META[nextStatus].label}(으)로 변경했습니다.`);
+    } catch (error) {
+      toast.error(errorMessage(error, "상태 변경에 실패했습니다."));
+    }
+  };
+
+  const normalizeMediaForSave = (
+    list: LegacyMedia[],
+    type: AttachmentType,
+    defaultStatus: string,
+  ): AttachmentRef[] => {
+    const now = new Date().toISOString();
+
+    return list
+      .map((item) => {
+        if (!item?.id) return null;
+
+        const normalized: LegacyMedia = {
+          id: item.id,
+          type,
+          status: item.status || defaultStatus,
+          timestamp: item.timestamp || now,
+        };
+
+        const legacy = getLegacyUrl(item);
+        if (legacy) normalized.url = legacy;
+        return normalized as AttachmentRef;
+      })
+      .filter(Boolean) as AttachmentRef[];
+  };
+  const prepareMediaRefsForSave = async (
+    list: LegacyMedia[],
+    type: AttachmentType,
+    defaultStatus: string,
+  ): Promise<AttachmentRef[]> => {
+    const stableRefs = normalizeMediaForSave(
+      list.filter((item) => !getLegacyUrl(item)),
+      type,
+      defaultStatus,
+    );
+
+    const legacyItems = list.filter((item) => !!getLegacyUrl(item));
+    if (legacyItems.length === 0) return stableRefs;
+
+    const files: File[] = [];
+    const fallbackLegacyRefs: AttachmentRef[] = [];
+
+    for (let i = 0; i < legacyItems.length; i += 1) {
+      const row = legacyItems[i];
+      const legacyUrl = getLegacyUrl(row);
+      if (!legacyUrl) continue;
+
+      try {
+        const response = await fetch(legacyUrl);
+        const blob = await response.blob();
+        const ext = blob.type.includes("png")
+          ? "png"
+          : blob.type.includes("webp")
+            ? "webp"
+            : blob.type.includes("gif")
+              ? "gif"
+              : "jpg";
+        files.push(
+          new File([blob], `${type}_${Date.now()}_${i}.${ext}`, {
+            type: blob.type || "application/octet-stream",
+          }),
+        );
+      } catch {
+        fallbackLegacyRefs.push(...normalizeMediaForSave([row], type, defaultStatus));
+      }
+    }
+
+    if (files.length === 0) {
+      return [...stableRefs, ...fallbackLegacyRefs];
+    }
+
+    try {
+      const converted = await saveFiles({
+        worklogId: editingLogId || `${form.siteValue || form.siteName}_${form.workDate}`,
+        type,
+        files,
+        defaultStatus,
+      });
+      return [...stableRefs, ...converted, ...fallbackLegacyRefs];
+    } catch {
+      return [...stableRefs, ...fallbackLegacyRefs];
+    }
+  };
+
+  const buildPayload = (
+    intent: SaveIntent,
+    version: number,
+    photos: AttachmentRef[],
+    drawings: AttachmentRef[],
+  ): WorklogMutationInput => {
+    const manpower = form.manpower
+      .map((row) => ({
+        ...row,
+        worker: row.worker.trim(),
+        workHours: Number(row.workHours || 0),
+      }))
+      .filter((row) => row.worker && row.workHours > 0);
+
+    const workSets = form.workSets
+      .map((row) => ({
+        ...row,
+        member: row.member || "",
+        process: row.process || "",
+        type: row.type || "",
+        location: cloneLocation(row.location),
+        customMemberValue: row.customMemberValue || "",
+        customProcessValue: row.customProcessValue || "",
+        customTypeValue: row.customTypeValue || "",
+      }))
+      .filter((row) => resolvedValue(row.member, row.customMemberValue) && resolvedValue(row.process, row.customProcessValue));
+
+    const materials = form.materials
+      .map((row) => ({
+        ...row,
+        name: row.name.trim(),
+        qty: Number(row.qty || 0),
+      }))
+      .filter((row) => row.name && row.qty > 0);
+
+    return {
+      siteName: form.siteName.trim(),
+      siteValue: form.siteValue,
+      dept: form.dept,
+      workDate: form.workDate,
+      weather: form.memo,
+      manpower,
+      workSets,
+      materials,
+      photos,
+      drawings,
+      photoCount: photos.filter((item) => normalizePhotoStatus(item.status) !== "receipt").length,
+      drawingCount: drawings.length,
+      status: intent,
+      version,
+    };
+  };
+
+  const handleSave = async (intent: SaveIntent): Promise<boolean> => {
+    if (busy) return false;
+
+    if (!hasSiteName) {
+      toast.error("현장명을 선택해주세요.");
+      return false;
+    }
+
+    if (!hasDate) {
+      toast.error("작업일자를 선택해주세요.");
+      return false;
+    }
+
+    if (intent === "pending" && !isReadyToSubmit) {
+      toast.error("승인요청 조건(현장/투입/작업/사진·도면)을 확인해주세요.");
+      return false;
+    }
+
+    setIsSaving(true);
+
+    try {
+      const existing = selectedSiteLogMap.get(form.workDate);
+
+      const [preparedPhotos, preparedDrawings] = await Promise.all([
+        prepareMediaRefsForSave(form.photos, "photo", "after"),
+        prepareMediaRefsForSave(form.drawings, "drawing", "progress"),
+      ]);
+
+      const payload = buildPayload(intent, existing ? existing.version + 1 : 1, preparedPhotos, preparedDrawings);
+
+      if (existing) {
+        await updateMutation.mutateAsync({ id: existing.id, entry: payload });
+        setEditingLogId(existing.id);
+      } else {
+        await saveMutation.mutateAsync(payload);
+      }
+
+      setForm((prev) => ({
+        ...prev,
+        status: intent,
+        photos: preparedPhotos as LegacyMedia[],
+        drawings: preparedDrawings as LegacyMedia[],
+      }));
+      clearMemoAutosave(form.siteValue, form.siteName, form.workDate);
+      loadKeyRef.current = "";
+      toast.success(intent === "pending" ? "승인요청이 완료되었습니다." : "임시저장되었습니다.");
+      return true;
+    } catch (error) {
+      toast.error(errorMessage(error, "저장에 실패했습니다."));
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const openMediaViewer = async (item: LegacyMedia, title: string) => {
+    const legacy = getLegacyUrl(item);
+    if (legacy) {
+      setViewer({ open: true, url: legacy, title });
+      return;
+    }
+
+    const url = await getObjectUrl(item.id);
+    if (!url) {
+      toast.error("미리보기를 불러오지 못했습니다.");
+      return;
+    }
+
+    setViewer({ open: true, url, title });
+  };
+
+  const uploadMedia = async (
+    type: AttachmentType,
+    fileList: FileList | null,
+    options?: {
+      defaultStatus?: string;
+      label?: string;
+    },
+  ) => {
+    if (!fileList || fileList.length === 0) return;
+
+    if (!hasSiteName || !hasDate) {
+      toast.error("현장과 작업일자를 먼저 선택해주세요.");
+      return;
+    }
+
+    try {
+      const refs = await saveFiles({
+        worklogId: editingLogId || `${form.siteValue || form.siteName}_${form.workDate}`,
+        type,
+        files: Array.from(fileList),
+        defaultStatus: options?.defaultStatus || (type === "photo" ? "after" : "progress"),
+      });
+
+      if (type === "photo") {
+        setForm((prev) => ({ ...prev, photos: [...prev.photos, ...(refs as LegacyMedia[])] }));
+      } else {
+        setForm((prev) => ({ ...prev, drawings: [...prev.drawings, ...(refs as LegacyMedia[])] }));
+      }
+
+      toast.success(`${options?.label || (type === "photo" ? "사진" : "도면")} ${refs.length}건이 추가되었습니다.`);
+    } catch {
+      toast.error("파일 저장에 실패했습니다.");
+    }
+  };
+
+  const removeMediaItem = async (type: AttachmentType, index: number) => {
+    const source = type === "photo" ? form.photos : form.drawings;
+    const target = source[index];
+    if (!target) return;
+
+    if (isAttachmentRef(target) && !getLegacyUrl(target)) {
+      await deleteRef(target.id);
+      revokeObjectUrl(target.id);
+    }
+
+    if (type === "photo") {
+      setForm((prev) => ({ ...prev, photos: prev.photos.filter((_, rowIndex) => rowIndex !== index) }));
+    } else {
+      setForm((prev) => ({ ...prev, drawings: prev.drawings.filter((_, rowIndex) => rowIndex !== index) }));
+    }
+  };
+
+  const togglePhotoItemStatus = (index: number) => {
+    setForm((prev) => ({
+      ...prev,
+      photos: prev.photos.map((item, rowIndex) => {
+        if (rowIndex !== index) return item;
+        if (isReceiptPhoto(item)) return item;
+        const next = normalizePhotoStatus(item.status) === "before" ? "after" : "before";
+        return { ...item, status: next };
+      }),
+    }));
+  };
+
+  const toggleDrawingItemStatus = (index: number) => {
+    setForm((prev) => ({
+      ...prev,
+      drawings: prev.drawings.map((item, rowIndex) => {
+        if (rowIndex !== index) return item;
+        const next = normalizeDrawingStatus(item.status) === "done" ? "progress" : "done";
+        return { ...item, status: next };
+      }),
+    }));
+  };
+
+  const openDrawingMarking = async (item: LegacyMedia, index: number) => {
+    const legacy = getLegacyUrl(item);
+    if (legacy) {
+      setMarking({ open: true, index, imageSrc: legacy });
+      return;
+    }
+
+    const url = await getObjectUrl(item.id);
+    if (!url) {
+      toast.error("마킹 이미지를 불러오지 못했습니다.");
+      return;
+    }
+
+    setMarking({ open: true, index, imageSrc: url });
+  };
+
+  const addMaterialFromPreset = () => {
+    const qty = Number(materialQty || 0);
+    const name = (isMaterialDirect ? customMaterialValue : materialSelect).trim();
+    if (!name || qty <= 0) {
+      toast.error("자재명과 수량을 입력해주세요.");
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      materials: [...prev.materials, { id: makeRowId(), name, qty }],
+    }));
+    setMaterialQty("");
+    if (isMaterialDirect) setCustomMaterialValue("");
+  };
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+      <div className="py-20 flex items-center justify-center text-text-sub">
+        <Loader2 className="w-8 h-8 animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="animate-fade-in">
-      {/* Search */}
-      <div className="relative mb-3 mt-3">
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="현장 또는 작업 내용 검색"
-          className="w-full h-[50px] bg-card border border-border rounded-xl px-4 pr-12 text-base-app font-medium text-foreground placeholder:text-muted-foreground transition-all hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)] outline-none"
-        />
-        {search ? (
-          <button onClick={() => setSearch("")} className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-muted flex items-center justify-center">
-            <X className="w-3 h-3 text-muted-foreground" />
-          </button>
-        ) : (
-          <Search className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-        )}
-      </div>
-
-      {/* Filters */}
-      <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1 no-scrollbar">
-        {FILTERS.map(f => (
-          <button
-            key={f.key}
-            onClick={() => setFilter(f.key)}
-            className={cn(
-              "h-10 px-3.5 rounded-full text-sm-app font-medium whitespace-nowrap flex-shrink-0 border transition-all cursor-pointer flex items-center gap-1.5",
-              filter === f.key
-                ? "bg-header-navy text-header-navy-foreground border-transparent shadow-none"
-                : "bg-card text-muted-foreground border-border hover:bg-muted/40 hover:border-border"
-            )}
-          >
-            {f.label}
-            {statusCounts[f.key] > 0 && (
-              <span className={cn(
-                "min-w-[18px] h-[18px] rounded-full text-[10px] font-[900] flex items-center justify-center",
-                filter === f.key ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
-              )}>
-                {statusCounts[f.key]}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      {/* Empty state */}
-      {filtered.length === 0 && (
-        <div className="text-center py-20">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-muted rounded-full mb-5">
-            <Calendar className="w-8 h-8 text-muted-foreground opacity-60" />
-          </div>
-          <p className="text-base-app font-medium text-muted-foreground mb-2">
-            {logs.length === 0 ? "저장된 작업일지가 없습니다" : "검색 결과가 없습니다"}
-          </p>
-          {logs.length === 0 && (
-            <p className="text-sm-app text-muted-foreground">홈 화면에서 일지를 작성하면 여기에 표시됩니다</p>
-          )}
-        </div>
-      )}
-
-      {/* Worklog Cards */}
-      <div className="space-y-3">
-        {filtered.map(log => {
-          const status = STATUS_CONFIG[log.status];
-          const expanded = expandedId === log.id;
-          const totalHours = getTotalHours(log);
-          const workerCount = log.manpower?.length || 0;
-          const firstWorkSet = log.workSets?.[0];
-          const memberLabel = firstWorkSet ? (firstWorkSet.member === "기타" ? firstWorkSet.customMemberValue : firstWorkSet.member) : "";
-          const processLabel = firstWorkSet ? (firstWorkSet.process === "기타" ? firstWorkSet.customProcessValue : firstWorkSet.process) : "";
-          const contentSummary = [memberLabel, processLabel].filter(Boolean).join(" · ") || "작업내용 없음";
-
-          return (
-            <div key={log.id} className="bg-card rounded-2xl shadow-soft overflow-hidden transition-all">
-              <div
-                className="p-5 cursor-pointer active:bg-muted/30 transition-colors"
-                onClick={() => setExpandedId(expanded ? null : log.id)}
+    <div className="animate-fade-in pb-[calc(env(safe-area-inset-bottom)+104px)]">
+      <section className="sticky top-0 z-30 border-b border-border bg-background/95 px-0 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85">
+        <div className="space-y-2">
+          <div className="relative">
+              <input
+                value={siteSearch}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setSiteSearch(next);
+                  setShowSiteDropdown(true);
+                  if (!next.trim()) {
+                    setForm((prev) => ({ ...prev, siteValue: "", siteName: "", dept: "" }));
+                  }
+                }}
+                onFocus={() => setShowSiteDropdown(true)}
+                onBlur={() => window.setTimeout(() => setShowSiteDropdown(false), 120)}
+                placeholder="현장 선택 또는 검색"
+                className="w-full h-[52px] rounded-xl border border-border bg-card px-4 pr-11 text-base-app font-semibold text-foreground outline-none transition-all hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)]"
+              />
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => setShowSiteDropdown((prev) => !prev)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
               >
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-primary" />
-                    <span className="text-sm-app text-text-sub font-medium">{log.workDate}</span>
-                    {log.version > 1 && (
-                      <>
-                        <span className="text-sm-app text-text-sub">·</span>
-                        <span className="text-tiny text-muted-foreground font-medium">v{log.version}</span>
-                      </>
-                    )}
-                  </div>
-                  <span className={cn("text-tiny font-bold px-2.5 py-1 rounded-full border", status.className)}>
-                    {status.label}
+                {showSiteDropdown ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+              </button>
+
+              {showSiteDropdown && (
+                <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-xl border border-border bg-card shadow-soft">
+                  {filteredSiteOptions.length > 0 ? (
+                    <div className="max-h-64 overflow-y-auto">
+                      {filteredSiteOptions.map((site) => (
+                        <button
+                          key={site.site_id}
+                          type="button"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => selectSite(site.site_id, site.site_name, site.dept)}
+                          className="w-full px-4 py-3 text-left hover:bg-muted transition-colors"
+                        >
+                          <p className="text-sm-app font-bold text-foreground">{site.site_name}</p>
+                          {site.dept && <p className="text-tiny text-text-sub">{site.dept}</p>}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="px-4 py-5 text-sm-app text-text-sub">검색 결과가 없습니다.</div>
+                  )}
+                </div>
+              )}
+          </div>
+
+          <div className="grid grid-cols-[1fr_auto] gap-2">
+            <input
+              type="date"
+              value={form.workDate}
+              onChange={(event) => setForm((prev) => ({ ...prev, workDate: event.target.value }))}
+              className="h-[52px] rounded-xl border border-border bg-card px-3 text-sm-app font-semibold text-foreground outline-none transition-all hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)]"
+            />
+
+            <button
+              type="button"
+              onClick={() => setLogListOpen(true)}
+              className="inline-flex h-[52px] items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3 text-sm-app font-semibold text-text-sub transition-all hover:border-primary/50 whitespace-nowrap"
+            >
+              <ClipboardList className="h-4 w-4" />
+              일지목록
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 rounded-xl border border-border bg-card p-1">
+              <button
+                type="button"
+                onClick={() => setActiveTab("write")}
+                className={cn(
+                  "h-10 rounded-lg text-sm-app font-bold transition-colors",
+                  activeTab === "write" ? "bg-header-navy text-header-navy-foreground" : "text-text-sub hover:bg-muted",
+                )}
+              >
+                작성
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab("view");
+                  setLogListOpen(true);
+                }}
+                className={cn(
+                  "h-10 rounded-lg text-sm-app font-bold transition-colors",
+                  activeTab === "view" ? "bg-header-navy text-header-navy-foreground" : "text-text-sub hover:bg-muted",
+                )}
+              >
+                일지보기
+              </button>
+          </div>
+        </div>
+      </section>
+      <div className="space-y-3 pt-3">
+        {activeTab === "write" ? (
+          <>
+            <section className="relative overflow-hidden rounded-2xl border border-border bg-card px-4 py-4 shadow-soft">
+              <span className={cn("absolute top-0 right-0 z-10 px-2.5 py-1 text-[11px] font-bold rounded-bl-xl", STATUS_META[currentStatus].cornerClass)}>
+                {STATUS_META[currentStatus].label}
+              </span>
+              <div className="min-w-0 pr-16">
+                <div className="text-sm-app text-text-sub font-medium mb-1 max-[640px]:mb-0.5">{form.workDate || "-"}</div>
+                <p className="truncate text-[19px] font-[800] leading-snug text-header-navy">
+                  {form.siteName || "현장을 선택하세요"}
+                </p>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <span className="inline-flex h-6 items-center rounded-lg border border-sky-200 bg-sky-50 px-2 text-[12px] font-semibold text-sky-700">
+                    소속 {form.dept || "미지정"}
                   </span>
-                </div>
-                <div className="flex items-center gap-1.5 mb-2">
-                  <MapPin className="w-4 h-4 text-primary flex-shrink-0" />
-                  <span className="text-sm-app text-primary font-bold truncate">{log.siteName}</span>
-                </div>
-                <p className="text-base-app font-bold text-foreground mb-2 truncate">{contentSummary}</p>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm-app text-text-sub font-medium">투입 {workerCount}명</span>
-                    <span className="text-sm-app text-text-sub">·</span>
-                    <span className="text-sm-app text-text-sub font-medium">{totalHours.toFixed(1)}공수</span>
-                    {log.photoCount > 0 && (
-                      <>
-                        <span className="text-sm-app text-text-sub">·</span>
-                        <span className="text-sm-app text-text-sub font-medium">📷 {log.photoCount}</span>
-                      </>
-                    )}
-                  </div>
-                  <ChevronDown className={cn("w-5 h-5 text-muted-foreground transition-transform", expanded && "rotate-180")} />
+                  <span className="inline-flex h-6 items-center rounded-lg border border-indigo-200 bg-indigo-50 px-2 text-[12px] font-semibold text-indigo-700">
+                    원청 {affiliationLabel}
+                  </span>
                 </div>
               </div>
 
-              {expanded && (
-                <div className="px-5 pb-5 border-t border-border animate-slide-down">
-                  <div className="py-3 border-b border-dashed border-border">
-                    <div className="text-sm-app font-bold text-text-sub mb-2">투입 인원</div>
-                    <div className="flex flex-wrap gap-2">
-                      {log.manpower?.map((m, i) => (
-                        <span key={i} className="text-sm-app bg-muted px-3 py-1.5 rounded-lg font-medium">
-                          {m.worker} <span className="text-primary font-bold">{m.workHours.toFixed(1)}</span>
-                        </span>
-                      ))}
+              <p className="mt-2 truncate text-tiny font-semibold text-text-sub">{headerInlineSummary}</p>
+              <div className="mt-2.5">
+                <WorklogStatusProgress status={currentStatus} />
+              </div>
+            </section>
+
+            <section
+              className={cn(
+                "rounded-2xl border px-4 py-2.5",
+                isReadyToSubmit ? "border-rose-200 bg-rose-50" : "border-rose-200 bg-rose-50",
+              )}
+            >
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={cn(
+                    "inline-flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full border bg-white",
+                    isReadyToSubmit ? "border-rose-300 text-rose-600" : "border-rose-300 text-rose-600",
+                  )}
+                >
+                  {isReadyToSubmit ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
+                </div>
+                <div className="min-w-0 truncate whitespace-nowrap text-[13px] font-semibold leading-none text-rose-800">
+                  {isReadyToSubmit ? "승인요청 가능" : `필수: ${pendingInline}`}
+                </div>
+              </div>
+            </section>
+
+            <section className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <SummaryCard
+                icon={<Users className="w-5 h-5 text-header-navy" />}
+                title="투입"
+                summary={manpowerSummary}
+                onClick={() => setSheet("manpower")}
+              />
+
+              <SummaryCard
+                icon={<HardHat className="w-5 h-5 text-header-navy" />}
+                title="작업"
+                summary={workSummary}
+                onClick={() => setSheet("work")}
+                required
+                missing={workValidCount === 0}
+              />
+
+              <SummaryCard
+                icon={<Package className="w-5 h-5 text-header-navy" />}
+                title="자재"
+                summary={materialSummary}
+                onClick={() => setSheet("material")}
+              />
+
+              <SummaryCard
+                icon={<Camera className="w-5 h-5 text-header-navy" />}
+                title="사진 · 도면"
+                summary={mediaSummary}
+                onClick={() => setSheet("media")}
+                required
+                missing={mediaRequiredCount === 0}
+              />
+            </section>
+
+            <section className="rounded-2xl border border-border bg-card px-4 py-4 shadow-soft">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-sm-app font-bold text-header-navy">메모 (선택)</p>
+                <span className="text-tiny font-semibold text-text-sub">자동저장</span>
+              </div>
+              <textarea
+                rows={4}
+                value={form.memo}
+                onChange={(event) => setForm((prev) => ({ ...prev, memo: event.target.value }))}
+                onInput={(event) => {
+                  const el = event.currentTarget;
+                  el.style.height = "auto";
+                  el.style.height = `${Math.max(50, el.scrollHeight)}px`;
+                }}
+                placeholder="메모를 입력하면 자동으로 저장됩니다."
+                className="min-h-[50px] w-full resize-none rounded-xl border border-border bg-background px-3 py-2.5 text-sm-app font-medium text-foreground outline-none transition-all focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)]"
+              />
+            </section>
+          </>
+        ) : (
+          <>
+            <section className="rounded-2xl border border-border bg-card px-4 py-4 shadow-soft">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-base-app font-bold text-header-navy">날짜별 누적</p>
+                  <p className="text-tiny text-text-sub">카드를 누르면 작성 탭으로 바로 이동합니다.</p>
+                </div>
+                <span className="text-tiny font-semibold text-text-sub">{dailyRows.length}건</span>
+              </div>
+
+              {!hasSiteName ? (
+                <div className="rounded-xl border border-dashed border-border bg-background px-3 py-10 text-center text-sm-app font-semibold text-text-sub">
+                  현장을 먼저 선택하세요.
+                </div>
+              ) : dailyRows.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border bg-background px-3 py-10 text-center text-sm-app font-semibold text-text-sub">
+                  작성된 일지가 없습니다.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {dailyRows.map((row) => {
+                    const entry = selectedSiteLogMap.get(row.date);
+                    return (
+                      <div key={`${row.date}_${row.versions}`} className="rounded-xl border border-border bg-background px-3 py-3">
+                        <button
+                          type="button"
+                          onClick={() => moveToDate(row.date)}
+                          className="w-full text-left transition-colors hover:bg-muted"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm-app font-bold text-header-navy">
+                              {row.date} · v{row.versions}
+                            </p>
+                            <span className={cn("inline-flex h-6 items-center rounded-full border px-2 text-[11px] font-bold", STATUS_META[row.status].chipClass)}>
+                              {STATUS_META[row.status].label}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-tiny font-medium text-text-sub">
+                            투입 {row.manpower.length}명 · 작업 {row.workSets.length}건 · 사진 {rowPhotoCount(row)} · 도면 {getRowDrawings(row).length} · 확인서 {rowReceiptCount(row)}
+                          </p>
+                        </button>
+                        {entry && (
+                          <div className="mt-2 flex gap-1.5">
+                            {canRequestEntry(entry) && (
+                              <button
+                                type="button"
+                                onClick={() => updateStatus(entry, "pending")}
+                                className="h-8 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
+                              >
+                                승인요청
+                              </button>
+                            )}
+                            {canWithdrawEntry(entry) && (
+                              <button
+                                type="button"
+                                onClick={() => updateStatus(entry, "draft")}
+                                className="h-8 rounded-lg border border-blue-200 bg-blue-50 px-2.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
+                              >
+                                요청취소
+                              </button>
+                            )}
+                            {canApproveEntry(entry) && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => updateStatus(entry, "approved")}
+                                  className="h-8 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100"
+                                >
+                                  승인
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => updateStatus(entry, "rejected")}
+                                  className="h-8 rounded-lg border border-red-200 bg-red-50 px-2.5 text-[11px] font-semibold text-red-700 hover:bg-red-100"
+                                >
+                                  반려
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-2xl border border-border bg-card px-4 py-4 shadow-soft">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-base-app font-bold text-header-navy">사진함 (누적 {sitePhotoRows.length}건)</p>
+                <button
+                  type="button"
+                  onClick={() => setGalleryKind("photo")}
+                  className="h-8 rounded-full border border-border bg-background px-3 text-tiny font-semibold text-text-sub hover:bg-muted"
+                >
+                  전체보기
+                </button>
+              </div>
+
+              {photoGroups.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border bg-background px-3 py-8 text-center text-sm-app font-medium text-text-sub">
+                  자료가 없습니다.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {photoGroups.slice(0, 4).map((group) => (
+                    <div key={`photo_group_${group.date}`} className="rounded-xl border border-border bg-background px-2.5 py-2.5">
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <p className="text-tiny font-semibold text-header-navy">{group.date}</p>
+                        <button type="button" onClick={() => moveToDate(group.date)} className="text-[11px] font-semibold text-primary">
+                          해당 일지 이동
+                        </button>
+                      </div>
+                      <div className="flex gap-2 overflow-x-auto no-scrollbar pb-0.5">
+                        {group.items.map((row) => {
+                          const url = previewMap[row.key];
+                          return (
+                            <button
+                              key={row.key}
+                              type="button"
+                              onClick={() => openMediaViewer(row.item, row.title)}
+                              className="h-[84px] w-[84px] shrink-0 overflow-hidden rounded-lg border border-border bg-muted"
+                            >
+                              {url ? (
+                                <img src={url} alt={row.title} className="h-full w-full object-cover" />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                  <ImageIcon className="h-5 w-5" />
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-2xl border border-border bg-card px-4 py-4 shadow-soft">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-base-app font-bold text-header-navy">도면함 (누적 {siteDrawingRows.length}건)</p>
+                <button
+                  type="button"
+                  onClick={() => setGalleryKind("drawing")}
+                  className="h-8 rounded-full border border-border bg-background px-3 text-tiny font-semibold text-text-sub hover:bg-muted"
+                >
+                  전체보기
+                </button>
+              </div>
+
+              {drawingGroups.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border bg-background px-3 py-8 text-center text-sm-app font-medium text-text-sub">
+                  자료가 없습니다.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {drawingGroups.slice(0, 4).map((group) => (
+                    <div key={`drawing_group_${group.date}`} className="rounded-xl border border-border bg-background px-2.5 py-2.5">
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <p className="text-tiny font-semibold text-header-navy">{group.date}</p>
+                        <button type="button" onClick={() => moveToDate(group.date)} className="text-[11px] font-semibold text-primary">
+                          해당 일지 이동
+                        </button>
+                      </div>
+                      <div className="flex gap-2 overflow-x-auto no-scrollbar pb-0.5">
+                        {group.items.map((row) => {
+                          const url = previewMap[row.key];
+                          return (
+                            <button
+                              key={row.key}
+                              type="button"
+                              onClick={() => openMediaViewer(row.item, row.title)}
+                              className="h-[84px] w-[84px] shrink-0 overflow-hidden rounded-lg border border-border bg-muted"
+                            >
+                              {url ? (
+                                <img src={url} alt={row.title} className="h-full w-full object-cover" />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                  <ImageIcon className="h-5 w-5" />
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </>
+        )}
+      </div>
+
+      {activeTab === "write" && (
+        <div className="fixed bottom-0 left-1/2 z-40 w-full max-w-[600px] -translate-x-1/2 border-t border-border bg-card/95 backdrop-blur">
+          <div className="grid grid-cols-2 gap-2 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+12px)]">
+            <button
+              type="button"
+              onClick={() => handleSave("draft")}
+              disabled={busy || !hasSiteName || !hasDate}
+              className="h-[52px] rounded-xl bg-muted text-sm-app font-bold text-foreground disabled:opacity-50"
+            >
+              {busy ? "저장중..." : "임시저장"}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSave("pending")}
+              disabled={busy || !isReadyToSubmit}
+              className="h-[52px] rounded-xl bg-header-navy text-sm-app font-bold text-header-navy-foreground disabled:opacity-50"
+            >
+              <span className="inline-flex items-center gap-1">
+                <Send className="h-4 w-4" /> 승인요청
+              </span>
+            </button>
+          </div>
+        </div>
+      )}
+      <Drawer open={logListOpen} onOpenChange={setLogListOpen}>
+        <DrawerContent className="z-[80] mx-auto max-w-[600px] rounded-t-2xl border-t border-border bg-white">
+          <DrawerHeader className="flex flex-row items-center justify-between">
+            <DrawerTitle className="text-base-app font-bold">일지목록</DrawerTitle>
+            <button type="button" onClick={() => setLogListOpen(false)} className="h-8 w-8 rounded-lg border border-border text-muted-foreground">
+              <X className="h-4 w-4 mx-auto" />
+            </button>
+          </DrawerHeader>
+          <div className="px-4 pb-6 max-h-[72dvh] overflow-y-auto space-y-2">
+            {!hasSiteName ? (
+              <div className="rounded-xl border border-dashed border-border bg-background px-3 py-8 text-center text-sm-app font-semibold text-text-sub">
+                현장을 먼저 선택하세요.
+              </div>
+            ) : dailyRows.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border bg-background px-3 py-8 text-center text-sm-app font-semibold text-text-sub">
+                작성된 일지가 없습니다.
+              </div>
+            ) : (
+              dailyRows.map((row) => (
+                <button
+                  key={`picker_${row.date}_${row.versions}`}
+                  type="button"
+                  onClick={() => moveToDate(row.date)}
+                  className="w-full rounded-xl border border-border bg-background px-3 py-3 text-left hover:bg-muted"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm-app font-bold text-header-navy">
+                      {row.date} · v{row.versions}
+                    </p>
+                    <span className={cn("inline-flex h-6 items-center rounded-full border px-2 text-[11px] font-bold", STATUS_META[row.status].chipClass)}>
+                      {STATUS_META[row.status].label}
+                    </span>
                   </div>
-                  <div className="py-3 border-b border-dashed border-border">
-                    <div className="text-sm-app font-bold text-text-sub mb-2">작업 내용</div>
-                    {log.workSets?.map((ws, i) => {
-                      const m = ws.member === "기타" ? ws.customMemberValue : ws.member;
-                      const p = ws.process === "기타" ? ws.customProcessValue : ws.process;
-                      const t = ws.type === "기타" ? ws.customTypeValue : ws.type;
-                      const loc = [ws.location?.block, ws.location?.dong, ws.location?.floor].filter(Boolean).join("/");
+                  <p className="mt-1 text-tiny font-medium text-text-sub">
+                    투입 {row.manpower.length}명 · 작업 {row.workSets.length}건 · 사진 {rowPhotoCount(row)} · 도면 {getRowDrawings(row).length} · 확인서 {rowReceiptCount(row)}
+                  </p>
+                </button>
+              ))
+            )}
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      <Drawer open={galleryKind !== null} onOpenChange={(open) => !open && setGalleryKind(null)}>
+        <DrawerContent className="mx-auto max-w-[600px] rounded-t-2xl border-t border-border bg-white">
+          <DrawerHeader className="flex flex-row items-center justify-between">
+            <DrawerTitle className="text-base-app font-bold">
+              {galleryKind === "photo" ? `사진함 전체 (${sitePhotoRows.length})` : `도면함 전체 (${siteDrawingRows.length})`}
+            </DrawerTitle>
+            <button type="button" onClick={() => setGalleryKind(null)} className="h-8 w-8 rounded-lg border border-border text-muted-foreground">
+              <X className="h-4 w-4 mx-auto" />
+            </button>
+          </DrawerHeader>
+          <div className="px-4 pb-6 max-h-[72dvh] overflow-y-auto space-y-3">
+            {(galleryKind === "photo" ? photoGroups : drawingGroups).length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border bg-background px-3 py-8 text-center text-sm-app font-semibold text-text-sub">
+                자료가 없습니다.
+              </div>
+            ) : (
+              (galleryKind === "photo" ? photoGroups : drawingGroups).map((group) => (
+                <div key={`gallery_${galleryKind}_${group.date}`} className="rounded-xl border border-border bg-background p-2.5">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-tiny font-semibold text-header-navy">{group.date}</p>
+                    <button
+                      type="button"
+                      onClick={() => moveToDate(group.date)}
+                      className="text-[11px] font-semibold text-primary"
+                    >
+                      해당 일지 이동
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {group.items.map((row) => {
+                      const url = previewMap[row.key];
                       return (
-                        <div key={i} className="text-sm-app mb-1.5">
-                          <span className="font-bold text-foreground">{m}</span>
-                          {p && <span className="text-text-sub"> · {p}</span>}
-                          {t && <span className="text-text-sub"> · {t}</span>}
-                          {loc && <span className="text-muted-foreground ml-1">({loc})</span>}
+                        <button
+                          key={`gallery_item_${row.key}`}
+                          type="button"
+                          onClick={() => openMediaViewer(row.item, row.title)}
+                          className="overflow-hidden rounded-lg border border-border bg-muted"
+                        >
+                          <div className="aspect-square w-full">
+                            {url ? (
+                              <img src={url} alt={row.title} className="h-full w-full object-cover" />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                <ImageIcon className="h-5 w-5" />
+                              </div>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      <Drawer open={sheet !== null} onOpenChange={(open) => !open && setSheet(null)}>
+        <DrawerContent className="mx-auto max-w-[600px] rounded-t-2xl border-t border-border bg-white">
+          {sheet === "manpower" && (
+            <>
+              <DrawerHeader className="flex flex-row items-center justify-between">
+                <DrawerTitle className="text-base-app font-bold">투입 인원</DrawerTitle>
+                <button type="button" onClick={() => setSheet(null)} className="h-8 w-8 rounded-lg border border-border text-muted-foreground">
+                  <X className="h-4 w-4 mx-auto" />
+                </button>
+              </DrawerHeader>
+              <div className="px-4 pb-6 max-h-[72dvh] overflow-y-auto space-y-3">
+                {form.manpower.map((row, index) => {
+                  const selectValue = row.isCustom || !PREDEFINED_WORKERS.includes(row.worker) ? "custom" : row.worker;
+
+                  return (
+                    <div key={row.id} className="rounded-xl border border-border bg-card p-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={selectValue}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            setForm((prev) => ({
+                              ...prev,
+                              manpower: prev.manpower.map((item) => {
+                                if (item.id !== row.id) return item;
+                                if (value === "custom") {
+                                  return { ...item, worker: "", isCustom: true };
+                                }
+                                return { ...item, worker: value, isCustom: false };
+                              }),
+                            }));
+                          }}
+                          className="flex-1 h-11 rounded-lg border border-border bg-background px-3 pr-9 text-sm-app font-medium text-foreground outline-none appearance-none"
+                          style={{
+                            backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364758b' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")",
+                            backgroundRepeat: "no-repeat",
+                            backgroundPosition: "right 10px center",
+                          }}
+                        >
+                          {PREDEFINED_WORKERS.map((name) => (
+                            <option key={name} value={name}>
+                              {name}
+                            </option>
+                          ))}
+                          <option value="custom">직접입력</option>
+                        </select>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setForm((prev) => ({
+                              ...prev,
+                              manpower:
+                                prev.manpower.length === 1
+                                  ? [createManpower()]
+                                  : prev.manpower.filter((item) => item.id !== row.id),
+                            }));
+                          }}
+                          className="w-10 h-10 rounded-lg border border-red-200 bg-red-50 text-red-600"
+                        >
+                          <Trash2 className="w-4 h-4 mx-auto" />
+                        </button>
+                      </div>
+
+                      {selectValue === "custom" && (
+                        <input
+                          value={row.worker}
+                          onChange={(event) => {
+                            setForm((prev) => ({
+                              ...prev,
+                              manpower: prev.manpower.map((item) =>
+                                item.id === row.id ? { ...item, worker: event.target.value, isCustom: true } : item,
+                              ),
+                            }));
+                          }}
+                          placeholder="작업자 이름 입력"
+                          className="w-full h-11 rounded-lg border border-border bg-background px-3 text-sm-app font-medium text-foreground outline-none"
+                        />
+                      )}
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setForm((prev) => ({
+                              ...prev,
+                              manpower: prev.manpower.map((item) =>
+                                item.id === row.id
+                                  ? { ...item, workHours: Math.max(0, Number(item.workHours || 0) - 0.5) }
+                                  : item,
+                              ),
+                            }));
+                          }}
+                          className="h-10 w-10 rounded-lg border border-border bg-background text-sm-app font-bold text-foreground"
+                        >
+                          -
+                        </button>
+                        <input
+                          type="number"
+                          step="0.5"
+                          min={0}
+                          value={row.workHours}
+                          onChange={(event) => {
+                            const nextValue = Number(event.target.value || 0);
+                            setForm((prev) => ({
+                              ...prev,
+                              manpower: prev.manpower.map((item) =>
+                                item.id === row.id ? { ...item, workHours: nextValue } : item,
+                              ),
+                            }));
+                          }}
+                          className="flex-1 h-10 rounded-lg border border-border bg-background px-3 text-center text-sm-app font-semibold text-foreground outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setForm((prev) => ({
+                              ...prev,
+                              manpower: prev.manpower.map((item) =>
+                                item.id === row.id
+                                  ? { ...item, workHours: Math.min(24, Number(item.workHours || 0) + 0.5) }
+                                  : item,
+                              ),
+                            }));
+                          }}
+                          className="h-10 w-10 rounded-lg border border-border bg-background text-sm-app font-bold text-foreground"
+                        >
+                          +
+                        </button>
+                      </div>
+
+                      <p className="text-tiny text-text-sub">#{index + 1} 투입 인원</p>
+                    </div>
+                  );
+                })}
+
+                <button
+                  type="button"
+                  onClick={() => setForm((prev) => ({ ...prev, manpower: [...prev.manpower, createManpower()] }))}
+                  className="w-full h-11 rounded-xl border border-primary/40 bg-primary-bg text-sm-app font-bold text-primary inline-flex items-center justify-center gap-1"
+                >
+                  <Plus className="w-4 h-4" /> 작업자 추가
+                </button>
+              </div>
+            </>
+          )}
+
+          {sheet === "work" && (
+            <>
+              <DrawerHeader className="flex flex-row items-center justify-between">
+                <DrawerTitle className="text-base-app font-bold">작업 내용</DrawerTitle>
+                <button type="button" onClick={() => setSheet(null)} className="h-8 w-8 rounded-lg border border-border text-muted-foreground">
+                  <X className="h-4 w-4 mx-auto" />
+                </button>
+              </DrawerHeader>
+              <div className="px-4 pb-6 max-h-[72dvh] overflow-y-auto space-y-3">
+                {form.workSets.map((row, index) => (
+                  <div key={row.id} className="rounded-xl border border-border bg-card p-3 space-y-3">
+                    <div>
+                      <p className="text-tiny font-semibold text-text-sub mb-1">부재명</p>
+                      <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1">
+                        {MEMBER_CHIPS.map((chip) => (
+                          <button
+                            key={chip}
+                            type="button"
+                            onClick={() => {
+                              setForm((prev) => ({
+                                ...prev,
+                                workSets: prev.workSets.map((item) =>
+                                  item.id === row.id ? { ...item, member: chip } : item,
+                                ),
+                              }));
+                            }}
+                            className={cn(
+                              "h-8 px-3 rounded-full border text-tiny font-semibold whitespace-nowrap",
+                              row.member === chip
+                                ? "bg-primary text-primary-foreground border-primary"
+                                : "bg-card text-text-sub border-border",
+                            )}
+                          >
+                            {chip}
+                          </button>
+                        ))}
+                      </div>
+                      {row.member === "기타" && (
+                        <input
+                          value={row.customMemberValue}
+                          onChange={(event) => {
+                            setForm((prev) => ({
+                              ...prev,
+                              workSets: prev.workSets.map((item) =>
+                                item.id === row.id ? { ...item, customMemberValue: event.target.value } : item,
+                              ),
+                            }));
+                          }}
+                          placeholder="부재명 직접입력"
+                          className="mt-2 w-full h-10 rounded-lg border border-border bg-background px-3 text-sm-app font-medium text-foreground outline-none"
+                        />
+                      )}
+                    </div>
+
+                    <div>
+                      <p className="text-tiny font-semibold text-text-sub mb-1">작업공정</p>
+                      <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1">
+                        {PROCESS_CHIPS.map((chip) => (
+                          <button
+                            key={chip}
+                            type="button"
+                            onClick={() => {
+                              setForm((prev) => ({
+                                ...prev,
+                                workSets: prev.workSets.map((item) =>
+                                  item.id === row.id ? { ...item, process: chip } : item,
+                                ),
+                              }));
+                            }}
+                            className={cn(
+                              "h-8 px-3 rounded-full border text-tiny font-semibold whitespace-nowrap",
+                              row.process === chip
+                                ? "bg-primary text-primary-foreground border-primary"
+                                : "bg-card text-text-sub border-border",
+                            )}
+                          >
+                            {chip}
+                          </button>
+                        ))}
+                      </div>
+                      {row.process === "기타" && (
+                        <input
+                          value={row.customProcessValue}
+                          onChange={(event) => {
+                            setForm((prev) => ({
+                              ...prev,
+                              workSets: prev.workSets.map((item) =>
+                                item.id === row.id ? { ...item, customProcessValue: event.target.value } : item,
+                              ),
+                            }));
+                          }}
+                          placeholder="작업공정 직접입력"
+                          className="mt-2 w-full h-10 rounded-lg border border-border bg-background px-3 text-sm-app font-medium text-foreground outline-none"
+                        />
+                      )}
+                    </div>
+
+                    <div>
+                      <p className="text-tiny font-semibold text-text-sub mb-1">구분</p>
+                      <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1">
+                        {TYPE_CHIPS.map((chip) => (
+                          <button
+                            key={chip}
+                            type="button"
+                            onClick={() => {
+                              setForm((prev) => ({
+                                ...prev,
+                                workSets: prev.workSets.map((item) =>
+                                  item.id === row.id ? { ...item, type: chip } : item,
+                                ),
+                              }));
+                            }}
+                            className={cn(
+                              "h-8 px-3 rounded-full border text-tiny font-semibold whitespace-nowrap",
+                              row.type === chip
+                                ? "bg-primary text-primary-foreground border-primary"
+                                : "bg-card text-text-sub border-border",
+                            )}
+                          >
+                            {chip}
+                          </button>
+                        ))}
+                      </div>
+                      {row.type === "기타" && (
+                        <input
+                          value={row.customTypeValue}
+                          onChange={(event) => {
+                            setForm((prev) => ({
+                              ...prev,
+                              workSets: prev.workSets.map((item) =>
+                                item.id === row.id ? { ...item, customTypeValue: event.target.value } : item,
+                              ),
+                            }));
+                          }}
+                          placeholder="구분 직접입력"
+                          className="mt-2 w-full h-10 rounded-lg border border-border bg-background px-3 text-sm-app font-medium text-foreground outline-none"
+                        />
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2">
+                      <input
+                        value={row.location.block}
+                        onChange={(event) => {
+                          setForm((prev) => ({
+                            ...prev,
+                            workSets: prev.workSets.map((item) =>
+                              item.id === row.id ? { ...item, location: { ...item.location, block: event.target.value } } : item,
+                            ),
+                          }));
+                        }}
+                        placeholder="블럭"
+                        className="h-10 rounded-lg border border-border bg-background px-2 text-center text-sm-app font-medium text-foreground outline-none"
+                      />
+                      <input
+                        value={row.location.dong}
+                        onChange={(event) => {
+                          setForm((prev) => ({
+                            ...prev,
+                            workSets: prev.workSets.map((item) =>
+                              item.id === row.id ? { ...item, location: { ...item.location, dong: event.target.value } } : item,
+                            ),
+                          }));
+                        }}
+                        placeholder="동"
+                        className="h-10 rounded-lg border border-border bg-background px-2 text-center text-sm-app font-medium text-foreground outline-none"
+                      />
+                      <input
+                        value={row.location.floor}
+                        onChange={(event) => {
+                          setForm((prev) => ({
+                            ...prev,
+                            workSets: prev.workSets.map((item) =>
+                              item.id === row.id ? { ...item, location: { ...item.location, floor: event.target.value } } : item,
+                            ),
+                          }));
+                        }}
+                        placeholder="층"
+                        className="h-10 rounded-lg border border-border bg-background px-2 text-center text-sm-app font-medium text-foreground outline-none"
+                      />
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForm((prev) => ({
+                            ...prev,
+                            workSets:
+                              prev.workSets.length === 1
+                                ? [createWorkSet()]
+                                : prev.workSets.filter((item) => item.id !== row.id),
+                          }));
+                        }}
+                        className="h-9 px-3 rounded-lg border border-red-200 bg-red-50 text-tiny font-semibold text-red-700 inline-flex items-center gap-1"
+                      >
+                        <Trash2 className="w-4 h-4" /> 항목삭제
+                      </button>
+                    </div>
+
+                    <p className="text-tiny text-text-sub">#{index + 1} 작업세트</p>
+                  </div>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={() => setForm((prev) => ({ ...prev, workSets: [...prev.workSets, createWorkSet()] }))}
+                  className="w-full h-11 rounded-xl border border-primary/40 bg-primary-bg text-sm-app font-bold text-primary inline-flex items-center justify-center gap-1"
+                >
+                  <Plus className="w-4 h-4" /> 작업 추가
+                </button>
+              </div>
+            </>
+          )}
+          {sheet === "material" && (
+            <>
+              <DrawerHeader className="flex flex-row items-center justify-between">
+                <DrawerTitle className="text-base-app font-bold">자재 사용</DrawerTitle>
+                <button type="button" onClick={() => setSheet(null)} className="h-8 w-8 rounded-lg border border-border text-muted-foreground">
+                  <X className="h-4 w-4 mx-auto" />
+                </button>
+              </DrawerHeader>
+              <div className="px-4 pb-6 max-h-[72dvh] overflow-y-auto space-y-3">
+                <div className="rounded-xl border border-border bg-background p-3 space-y-2">
+                  <div className="grid grid-cols-[1fr_110px] gap-2">
+                    <select
+                      value={isMaterialDirect ? "기타" : materialSelect}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setMaterialSelect(value);
+                        setIsMaterialDirect(value === "기타");
+                      }}
+                      className="h-10 rounded-lg border border-border bg-card px-3 pr-9 text-sm-app font-semibold text-foreground outline-none appearance-none"
+                      style={{
+                        backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364758b' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")",
+                        backgroundRepeat: "no-repeat",
+                        backgroundPosition: "right 10px center",
+                      }}
+                    >
+                      {MATERIAL_OPTIONS.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={materialQty}
+                      onChange={(event) => setMaterialQty(event.target.value)}
+                      placeholder="수량"
+                      className="h-10 rounded-lg border border-border bg-card px-3 text-center text-sm-app font-semibold text-foreground outline-none"
+                    />
+                  </div>
+                  {isMaterialDirect && (
+                    <input
+                      value={customMaterialValue}
+                      onChange={(event) => setCustomMaterialValue(event.target.value)}
+                      placeholder="자재명 직접입력"
+                      className="h-10 w-full rounded-lg border border-border bg-card px-3 text-sm-app font-medium text-foreground outline-none"
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={addMaterialFromPreset}
+                    className="w-full h-10 rounded-lg border border-primary/40 bg-primary-bg text-sm-app font-bold text-primary inline-flex items-center justify-center gap-1"
+                  >
+                    <Plus className="w-4 h-4" /> 자재 추가
+                  </button>
+                </div>
+
+                {form.materials.length === 0 && (
+                  <div className="rounded-xl border border-dashed border-border bg-background px-3 py-6 text-center text-sm-app font-medium text-text-sub">
+                    등록된 자재가 없습니다.
+                  </div>
+                )}
+
+                {form.materials.map((row) => (
+                  <div key={row.id} className="rounded-xl border border-border bg-card p-3 grid grid-cols-[1fr_88px_44px] gap-2 items-center">
+                    <input
+                      value={row.name}
+                      onChange={(event) => {
+                        setForm((prev) => ({
+                          ...prev,
+                          materials: prev.materials.map((item) =>
+                            item.id === row.id ? { ...item, name: event.target.value } : item,
+                          ),
+                        }));
+                      }}
+                      placeholder="자재명"
+                      className="h-10 rounded-lg border border-border bg-background px-3 text-sm-app font-medium text-foreground outline-none"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      value={row.qty}
+                      onChange={(event) => {
+                        setForm((prev) => ({
+                          ...prev,
+                          materials: prev.materials.map((item) =>
+                            item.id === row.id ? { ...item, qty: Number(event.target.value || 0) } : item,
+                          ),
+                        }));
+                      }}
+                      className="h-10 rounded-lg border border-border bg-background px-2 text-center text-sm-app font-semibold text-foreground outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForm((prev) => ({
+                          ...prev,
+                          materials: prev.materials.filter((item) => item.id !== row.id),
+                        }));
+                      }}
+                      className="h-10 w-10 rounded-lg border border-red-200 bg-red-50 text-red-600"
+                    >
+                      <Trash2 className="w-4 h-4 mx-auto" />
+                    </button>
+                  </div>
+                ))}
+
+              </div>
+            </>
+          )}
+
+          {sheet === "media" && (
+            <>
+              <DrawerHeader className="flex flex-row items-center justify-between">
+                <DrawerTitle className="text-base-app font-bold">사진 · 도면</DrawerTitle>
+                <button type="button" onClick={() => setSheet(null)} className="h-8 w-8 rounded-lg border border-border text-muted-foreground">
+                  <X className="h-4 w-4 mx-auto" />
+                </button>
+              </DrawerHeader>
+              <div className="px-4 pb-6 max-h-[72dvh] overflow-y-auto space-y-3">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <button
+                    type="button"
+                    onClick={() => photoInputRef.current?.click()}
+                    className="h-11 rounded-xl border border-primary/40 bg-primary-bg text-sm-app font-bold text-primary inline-flex items-center justify-center gap-1"
+                  >
+                    <Camera className="w-4 h-4" /> 사진 업로드/촬영
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => drawingInputRef.current?.click()}
+                    className="h-11 rounded-xl border border-primary/40 bg-primary-bg text-sm-app font-bold text-primary inline-flex items-center justify-center gap-1"
+                  >
+                    <ImageIcon className="w-4 h-4" /> 도면 추가
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => receiptInputRef.current?.click()}
+                    className="h-11 rounded-xl border border-indigo-200 bg-indigo-50 text-sm-app font-semibold text-indigo-700 inline-flex items-center justify-center gap-1"
+                  >
+                    <ClipboardList className="w-4 h-4" /> 확인서 이미지
+                  </button>
+                </div>
+                <p className="text-tiny text-text-sub">업로드는 작성 탭에서만 가능합니다.</p>
+
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={(event) => {
+                    uploadMedia("photo", event.target.files);
+                    event.target.value = "";
+                  }}
+                />
+                <input
+                  ref={drawingInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={(event) => {
+                    uploadMedia("drawing", event.target.files);
+                    event.target.value = "";
+                  }}
+                />
+                <input
+                  ref={receiptInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={(event) => {
+                    uploadMedia("photo", event.target.files, { defaultStatus: "receipt", label: "확인서" });
+                    event.target.value = "";
+                  }}
+                />
+
+                <div>
+                  <p className="mb-2 text-tiny font-semibold text-text-sub">사진 ({normalPhotoRowsForEdit.length})</p>
+                  {normalPhotoRowsForEdit.length === 0 && (
+                    <div className="rounded-lg border border-dashed border-border bg-background px-3 py-4 text-center text-tiny text-text-sub">
+                      등록된 사진이 없습니다.
+                    </div>
+                  )}
+                  <div className="grid grid-cols-3 gap-2">
+                    {normalPhotoRowsForEdit.map(({ item, index }, displayIndex) => {
+                      const key = `photo_${mediaItemKey(item, index)}`;
+                      const url = previewMap[key];
+
+                      return (
+                        <div key={key} className="overflow-hidden rounded-lg border border-border bg-card">
+                          <button
+                            type="button"
+                            onClick={() => openMediaViewer(item, `사진 ${displayIndex + 1}`)}
+                            className="w-full aspect-square bg-muted"
+                          >
+                            {url ? (
+                              <img src={url} alt={`사진 ${displayIndex + 1}`} className="h-full w-full object-cover" />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                <ImageIcon className="h-6 w-6" />
+                              </div>
+                            )}
+                          </button>
+                          <div className="grid grid-cols-2 border-t border-border">
+                            <button
+                              type="button"
+                              onClick={() => togglePhotoItemStatus(index)}
+                              className="h-8 border-r border-border text-[11px] font-semibold text-primary"
+                            >
+                              {photoStatusLabel(item.status)}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeMediaItem("photo", index)}
+                              className="h-8 text-[11px] font-semibold text-red-600"
+                            >
+                              삭제
+                            </button>
+                          </div>
                         </div>
                       );
                     })}
                   </div>
-                  {log.materials && log.materials.length > 0 && (
-                    <div className="py-3 border-b border-dashed border-border">
-                      <div className="text-sm-app font-bold text-text-sub mb-2">자재 사용</div>
-                      {log.materials.map((m, i) => (
-                        <div key={i} className="text-sm-app flex justify-between">
-                          <span>{m.name}</span>
-                          <span className="text-primary font-bold">{m.qty}말</span>
-                        </div>
-                      ))}
+                </div>
+
+                <div>
+                  <p className="mb-2 text-tiny font-semibold text-text-sub">도면 ({form.drawings.length})</p>
+                  {form.drawings.length === 0 && (
+                    <div className="rounded-lg border border-dashed border-border bg-background px-3 py-4 text-center text-tiny text-text-sub">
+                      등록된 도면이 없습니다.
                     </div>
                   )}
-                  <div className="py-3 border-b border-dashed border-border text-tiny text-muted-foreground">
-                    <div>작성: {new Date(log.createdAt).toLocaleString("ko-KR")}</div>
-                    {log.updatedAt && <div>수정: {new Date(log.updatedAt).toLocaleString("ko-KR")}</div>}
-                  </div>
-                  <div className="flex gap-2 pt-3">
-                    {log.status === "draft" && (
-                      <button
-                        onClick={() => handleStatusChange(log.id, "pending")}
-                        className="flex-1 h-11 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded-xl font-bold text-sm-app flex items-center justify-center gap-1.5"
-                      >
-                        <ChevronRight className="w-4 h-4" /> 승인요청
-                      </button>
-                    )}
-                    {log.status === "pending" && (
-                      <>
-                        <button
-                          onClick={() => handleStatusChange(log.id, "approved")}
-                          className="flex-1 h-11 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-xl font-bold text-sm-app flex items-center justify-center gap-1.5"
-                        >
-                          <Check className="w-4 h-4" /> 승인
-                        </button>
-                        <button
-                          onClick={() => handleStatusChange(log.id, "rejected")}
-                          className="flex-1 h-11 bg-red-50 text-red-600 border border-red-200 rounded-xl font-bold text-sm-app flex items-center justify-center gap-1.5"
-                        >
-                          <RotateCcw className="w-4 h-4" /> 반려
-                        </button>
-                      </>
-                    )}
-                    {log.status === "rejected" && (
-                      <button
-                        onClick={() => handleStatusChange(log.id, "draft")}
-                        className="flex-1 h-11 bg-blue-50 text-blue-600 border border-blue-200 rounded-xl font-bold text-sm-app flex items-center justify-center gap-1.5"
-                      >
-                        <Edit2 className="w-4 h-4" /> 재작성
-                      </button>
-                    )}
-                    <button
-                      onClick={() => setViewerLog(log)}
-                      className="h-11 px-4 bg-primary-bg text-primary border border-primary/30 rounded-xl font-bold text-sm-app flex items-center justify-center gap-1.5"
-                    >
-                      일지양식
-                    </button>
-                    <button
-                      onClick={() => handleDelete(log.id)}
-                      className="h-11 px-3 bg-destructive/10 text-destructive border border-destructive/20 rounded-xl font-bold text-sm-app flex items-center justify-center"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                  <div className="grid grid-cols-3 gap-2">
+                    {form.drawings.map((item, index) => {
+                      const key = `drawing_${mediaItemKey(item, index)}`;
+                      const url = previewMap[key];
+
+                      return (
+                        <div key={key} className="overflow-hidden rounded-lg border border-border bg-card">
+                          <button
+                            type="button"
+                            onClick={() => openMediaViewer(item, `도면 ${index + 1}`)}
+                            className="w-full aspect-square bg-muted"
+                          >
+                            {url ? (
+                              <img src={url} alt={`도면 ${index + 1}`} className="h-full w-full object-cover" />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                <ImageIcon className="h-6 w-6" />
+                              </div>
+                            )}
+                          </button>
+                          <div className="grid grid-cols-3 border-t border-border">
+                            <button
+                              type="button"
+                              onClick={() => toggleDrawingItemStatus(index)}
+                              className="h-8 border-r border-border text-[11px] font-semibold text-primary"
+                            >
+                              {drawingStatusLabel(item.status)}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openDrawingMarking(item, index)}
+                              className="h-8 border-r border-border text-[11px] font-semibold text-indigo-700"
+                            >
+                              마킹
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeMediaItem("drawing", index)}
+                              className="h-8 text-[11px] font-semibold text-red-600"
+                            >
+                              삭제
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
+
+                <div>
+                  <p className="mb-2 text-tiny font-semibold text-text-sub">확인서 ({receiptRowsForEdit.length})</p>
+                  {receiptRowsForEdit.length === 0 && (
+                    <div className="rounded-lg border border-dashed border-border bg-background px-3 py-4 text-center text-tiny text-text-sub">
+                      등록된 확인서가 없습니다.
+                    </div>
+                  )}
+                  <div className="grid grid-cols-3 gap-2">
+                    {receiptRowsForEdit.map(({ item, index }, displayIndex) => {
+                      const key = `receipt_${mediaItemKey(item, index)}`;
+                      const url = previewMap[`photo_${mediaItemKey(item, index)}`];
+
+                      return (
+                        <div key={key} className="overflow-hidden rounded-lg border border-border bg-card">
+                          <button
+                            type="button"
+                            onClick={() => openMediaViewer(item, `확인서 ${displayIndex + 1}`)}
+                            className="w-full aspect-square bg-muted"
+                          >
+                            {url ? (
+                              <img src={url} alt={`확인서 ${displayIndex + 1}`} className="h-full w-full object-cover" />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                <ImageIcon className="h-6 w-6" />
+                              </div>
+                            )}
+                          </button>
+                          <div className="grid grid-cols-2 border-t border-border">
+                            <div className="flex h-8 items-center justify-center border-r border-border text-[11px] font-semibold text-indigo-700">
+                              확인서
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeMediaItem("photo", index)}
+                              className="h-8 text-[11px] font-semibold text-red-600"
+                            >
+                              삭제
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </DrawerContent>
+      </Drawer>
+
+      <DocumentViewer
+        open={viewer.open}
+        onClose={() => setViewer({ open: false, url: "", title: "" })}
+        title={viewer.title}
+      >
+        <img src={viewer.url} alt={viewer.title} className="max-w-full max-h-full object-contain bg-white" />
+      </DocumentViewer>
+
+      <DrawingMarkingOverlay
+        isOpen={marking.open}
+        imageSrc={marking.imageSrc}
+        onPrev={() => setMarking({ open: false, index: -1, imageSrc: "" })}
+        onDeleteSelected={() => {
+          if (marking.index >= 0) {
+            void removeMediaItem("drawing", marking.index);
+          }
+          setMarking({ open: false, index: -1, imageSrc: "" });
+        }}
+        onSave={() => {
+          if (marking.index >= 0) {
+            setForm((prev) => ({
+              ...prev,
+              drawings: prev.drawings.map((item, rowIndex) =>
+                rowIndex === marking.index ? { ...item, status: "done" } : item,
+              ),
+            }));
+            toast.success("마킹 도면 상태를 완료로 저장했습니다.");
+          }
+          setMarking({ open: false, index: -1, imageSrc: "" });
+        }}
+      />
+    </div>
+  );
+}
+
+function SummaryCard({
+  icon,
+  title,
+  summary,
+  required = false,
+  missing = false,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  summary: string;
+  required?: boolean;
+  missing?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "w-full rounded-2xl border bg-card px-4 py-3 shadow-soft text-left transition-all active:scale-[0.99]",
+        missing ? "border-red-200" : "border-border",
+      )}
+    >
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <div className="flex items-center gap-2">
+          <span>{icon}</span>
+          <p className="text-sm-app font-bold text-header-navy">{title}</p>
+        </div>
+
+        {required && (
+          <span
+            className={cn(
+              "inline-flex h-6 items-center rounded-full border px-2 text-[11px] font-bold",
+              missing
+                ? "border-red-200 bg-red-50 text-red-600"
+                : "border-emerald-200 bg-emerald-50 text-emerald-600",
+            )}
+          >
+            {missing ? "필수" : "완료"}
+          </span>
+        )}
+      </div>
+
+      <p className="text-sm-app font-medium text-text-sub truncate">{summary}</p>
+    </button>
+  );
+}
+
+function WorklogStatusProgress({ status }: { status: WorklogStatus }) {
+  const rejected = status === "rejected";
+  const active = statusProgressStep(status);
+  const steps = rejected ? ["작성", "요청", "반려"] : ["작성", "요청", "완료"];
+  const filledChipClass = rejected ? "border-red-500 bg-red-500 text-white" : "border-sky-500 bg-sky-500 text-white";
+  const defaultChipClass = rejected ? "border-red-200 bg-white text-red-700" : "border-sky-200 bg-white text-sky-700";
+  const lineFilledClass = rejected ? "bg-red-400" : "bg-sky-400";
+  const lineDefaultClass = rejected ? "bg-red-200" : "bg-sky-200";
+  const ringClass = rejected ? "ring-2 ring-red-200" : "ring-2 ring-sky-200";
+
+  return (
+    <div
+      className={cn(
+        "w-full rounded-xl border px-2.5 py-2",
+        rejected ? "border-red-100 bg-red-50/70" : "border-sky-100 bg-sky-50/70",
+      )}
+    >
+      <div className="flex items-center">
+        {steps.map((step, index) => {
+          const stepIndex = index + 1;
+          const filled = stepIndex <= active;
+          const current = stepIndex === active;
+          return (
+            <div key={step} className="flex min-w-0 flex-1 items-center">
+              <span
+                className={cn(
+                  "inline-flex h-7 min-w-11 items-center justify-center rounded-full border px-2 text-[11px] font-bold transition-colors",
+                  filled ? filledChipClass : defaultChipClass,
+                  current && ringClass,
+                )}
+              >
+                {step}
+              </span>
+              {index < steps.length - 1 && (
+                <span className={cn("mx-1 h-[3px] flex-1 rounded-full", stepIndex < active ? lineFilledClass : lineDefaultClass)} />
               )}
             </div>
           );
         })}
       </div>
-
-      <DocumentViewer
-        open={!!viewerLog}
-        onClose={() => setViewerLog(null)}
-        title={viewerLog ? `${viewerLog.siteName} · 작업일지` : ""}
-      >
-        {viewerLog && <WorklogDocument entry={viewerLog} />}
-      </DocumentViewer>
     </div>
   );
 }
+
+

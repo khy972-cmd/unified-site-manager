@@ -1,19 +1,25 @@
-﻿import { useEffect, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import PartnerHomePage from "@/components/partner/PartnerHomePage";
 import { useUserRole } from "@/hooks/useUserRole";
+import LegacyHomePage from "@/pages/HomePage.legacy";
 
 const HOME_VER =
   import.meta.env.VITE_VERCEL_GIT_COMMIT_SHA ??
   import.meta.env.VERCEL_GIT_COMMIT_SHA ??
   Date.now().toString();
-const HOME_MAIN_URL = `/home-v2/main-v2-app/index.html?v=${HOME_VER}`;
+const APP_BASE = import.meta.env.BASE_URL || "/";
+const BASE_PREFIX = APP_BASE.endsWith("/") ? APP_BASE : `${APP_BASE}/`;
+const HOME_MAIN_URL = `${BASE_PREFIX}home-v2/main-v2-app/index.html?v=${HOME_VER}`;
+const HOME_FALLBACK_URL = `${BASE_PREFIX}home-v2/main-v2-app/index.html`;
 const HOME_ALLOWED_ROUTES = new Set(["/", "/output", "/worklog", "/site", "/doc", "/request"]);
 
 export default function HomePage() {
   const { isPartner } = useUserRole();
   const navigate = useNavigate();
   const [homeLoadFailed, setHomeLoadFailed] = useState(false);
+  const [homeSrc, setHomeSrc] = useState(HOME_MAIN_URL);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -35,6 +41,10 @@ export default function HomePage() {
     return <PartnerHomePage />;
   }
 
+  if (homeLoadFailed) {
+    return <LegacyHomePage />;
+  }
+
   return (
     <section
       className="-mx-4"
@@ -43,30 +53,41 @@ export default function HomePage() {
         marginBottom: "var(--home-section-mb, -1.5rem)",
       }}
     >
-      {homeLoadFailed ? (
-        <div
-          className="mx-4 rounded-2xl border border-border bg-card p-6 text-center shadow-soft"
-          style={{ minHeight: "calc(100dvh - var(--app-header-height, 114px))" }}
-        >
-          <p className="text-base font-semibold text-foreground">홈 화면을 불러오지 못했습니다.</p>
-          <button
-            type="button"
-            onClick={() => window.location.reload()}
-            className="mt-4 inline-flex items-center justify-center rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted"
-          >
-            홈 다시불러오기
-          </button>
-        </div>
-      ) : (
-        <iframe
-          title="INOPNC Home Main"
-          src={HOME_MAIN_URL}
-          className="block w-full border-0 bg-background"
-          style={{ height: "calc(100dvh - var(--app-header-height, 114px))" }}
-          onError={() => setHomeLoadFailed(true)}
-        />
-      )}
+      <iframe
+        ref={iframeRef}
+        title="INOPNC Home Main"
+        src={homeSrc}
+        className="block w-full border-0 bg-background"
+        style={{ height: "calc(100dvh - var(--app-header-height, 114px))" }}
+        onLoad={() => {
+          window.setTimeout(() => {
+            try {
+              const doc = iframeRef.current?.contentDocument;
+              const root = doc?.getElementById("root");
+              const hasRendered = !!root && root.childElementCount > 0;
+              if (hasRendered) return;
+              if (homeSrc !== HOME_FALLBACK_URL) {
+                setHomeSrc(HOME_FALLBACK_URL);
+                return;
+              }
+              setHomeLoadFailed(true);
+            } catch {
+              if (homeSrc !== HOME_FALLBACK_URL) {
+                setHomeSrc(HOME_FALLBACK_URL);
+                return;
+              }
+              setHomeLoadFailed(true);
+            }
+          }, 1200);
+        }}
+        onError={() => {
+          if (homeSrc !== HOME_FALLBACK_URL) {
+            setHomeSrc(HOME_FALLBACK_URL);
+            return;
+          }
+          setHomeLoadFailed(true);
+        }}
+      />
     </section>
   );
 }
-
