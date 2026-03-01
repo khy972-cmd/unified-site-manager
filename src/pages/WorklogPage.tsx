@@ -13,6 +13,7 @@ import {
   Loader2,
   Package,
   Plus,
+  Search,
   Send,
   Trash2,
   Users,
@@ -20,7 +21,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { useAuth } from "@/contexts/AuthContext";
 import { useUserRole } from "@/hooks/useUserRole";
 import { useSiteList } from "@/hooks/useSiteList";
 import {
@@ -585,15 +585,6 @@ function statusProgressStep(status: WorklogStatus) {
   return 1;
 }
 
-function compactPendingLabel(label: string) {
-  if (label === "현장명") return "현장";
-  if (label === "작업일자") return "날짜";
-  if (label === "투입 1명 이상") return "투입";
-  if (label === "작업 1건 이상") return "작업";
-  if (label === "사진 또는 도면 1건 이상") return "사진/도면";
-  return label;
-}
-
 function getLegacyUrl(item: LegacyMedia) {
   return typeof item?.url === "string" ? item.url : "";
 }
@@ -641,6 +632,13 @@ function formatDateTimeLabel(value: string) {
   const hh = String(date.getHours()).padStart(2, "0");
   const mm = String(date.getMinutes()).padStart(2, "0");
   return `${y}-${m}-${d} ${hh}:${mm}`;
+}
+
+function siteCardActionHint(status: WorklogStatus) {
+  if (status === "pending") return "승인 대기중 · 카드 열기 후 요청취소 또는 결과 확인";
+  if (status === "rejected") return "반려됨 · 카드 열기 후 반려 날짜부터 수정";
+  if (status === "approved") return "완료 · 변경 필요 시 날짜 선택 후 수정 저장";
+  return "작성중 · 카드 열기 후 필요한 날짜만 수정";
 }
 function buildMemoStorageKey(siteValue: string, siteName: string, date: string) {
   return `${siteKey(siteValue, siteName)}|${date}`;
@@ -767,12 +765,7 @@ function toFormStateFromSiteDaily(params: {
 }
 
 export default function WorklogPage() {
-  const { user } = useAuth();
   const { isPartner, loading: roleLoading } = useUserRole();
-  const metadataNameCandidates = [user?.user_metadata?.name, user?.user_metadata?.full_name, user?.user_metadata?.nickname];
-  const metadataWriterName =
-    metadataNameCandidates.find((value) => typeof value === "string" && value.trim()) as string | undefined;
-  const writerName = metadataWriterName?.trim() || user?.email?.split("@")[0] || "미지정";
 
   if (roleLoading) {
     return (
@@ -783,10 +776,10 @@ export default function WorklogPage() {
   }
 
   if (isPartner) return <PartnerWorklogPage />;
-  return <WorkerWorklogPage writerName={writerName} />;
+  return <WorkerWorklogPage />;
 }
 
-function WorkerWorklogPage({ writerName }: { writerName: string }) {
+function WorkerWorklogPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
@@ -805,6 +798,7 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
   const [logListOpen, setLogListOpen] = useState(false);
 
   const [siteSearch, setSiteSearch] = useState(() => parseHomeDraft(today)?.siteName || "");
+  const [isSiteSearchCompact, setIsSiteSearchCompact] = useState(() => !!parseHomeDraft(today)?.siteName);
   const [showSiteDropdown, setShowSiteDropdown] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [previewMap, setPreviewMap] = useState<Record<string, string>>({});
@@ -830,6 +824,8 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
 
   const loadKeyRef = useRef("");
   const activeMediaIdsRef = useRef<string[]>([]);
+  const siteInputRef = useRef<HTMLInputElement | null>(null);
+  const siteDefaultMapRef = useRef<Record<string, WorklogFormState>>({});
 
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const drawingInputRef = useRef<HTMLInputElement | null>(null);
@@ -989,15 +985,6 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
   const mediaRequiredCount = photoCount + form.drawings.length;
   const isReadyToSubmit = hasSiteName && hasDate && manpowerValidCount > 0 && workValidCount > 0 && mediaRequiredCount > 0;
 
-  const pendingItems = [
-    !hasSiteName ? "현장명" : "",
-    !hasDate ? "작업일자" : "",
-    manpowerValidCount === 0 ? "투입 1명 이상" : "",
-    workValidCount === 0 ? "작업 1건 이상" : "",
-    mediaRequiredCount === 0 ? "사진 또는 도면 1건 이상" : "",
-  ].filter(Boolean);
-  const pendingInline = pendingItems.map(compactPendingLabel).join(" · ");
-
   const manpowerSummary =
     manpowerValidCount > 0
       ? `${manpowerValidCount}명 / 총 ${countTotalHours(form.manpower).toFixed(1)}공수`
@@ -1008,7 +995,6 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
     mediaRequiredCount > 0 || receiptCount > 0
       ? `사진 ${photoCount}건 · 도면 ${form.drawings.length}건 · 확인서 ${receiptCount}건`
       : "사진 또는 도면을 등록하세요.";
-  const headerInlineSummary = `작성자 ${writerName} · 작업 ${workValidCount}건 · 사진 ${photoCount} · 도면 ${form.drawings.length} · 확인서 ${receiptCount}`;
   const photoRowsForEdit = useMemo(
     () => form.photos.map((item, index) => ({ item, index })),
     [form.photos],
@@ -1115,6 +1101,10 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
     .join(" · ");
 
   useEffect(() => {
+    if (!hasSiteName) setIsSiteSearchCompact(false);
+  }, [hasSiteName]);
+
+  useEffect(() => {
     if (!currentSiteKey || !hasSiteName) {
       setSiteDraft(null);
       setSiteMemo("");
@@ -1163,6 +1153,16 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
   const siteUnitVersion = siteDraft?.latestVersion || 0;
   const siteUnitUpdatedAt = siteDraft?.lastUpdatedAt || selectedSiteLogs[0]?.updatedAt || selectedSiteLogs[0]?.createdAt || "";
   const latestSiteLogUpdatedAt = selectedSiteLogs[0]?.updatedAt || selectedSiteLogs[0]?.createdAt || "";
+  const isPendingSite = siteUnitStatus === "pending";
+  const canEditSite = siteUnitStatus !== "pending";
+  const nextActionGuide = useMemo(() => {
+    if (siteUnitStatus === "pending") return "현재 상태: 승인대기 · 다음 단계: 하단 [통합요청 취소] 후 수정";
+    if (siteUnitStatus === "approved") return "현재 상태: 완료 · 다음 단계: 변경사항 있으면 수정 저장 후 통합승인요청";
+    if (!siteReadyToSubmit) return `현재 상태: 작성중 · 다음 단계: ${sitePendingInline} 입력`;
+    return "현재 상태: 제출가능 · 다음 단계: 하단 [통합승인요청]";
+  }, [sitePendingInline, siteReadyToSubmit, siteUnitStatus]);
+  const pulseRequest = !busy && !isPendingSite && siteReadyToSubmit;
+  const pulseCancel = !busy && isPendingSite;
 
   useEffect(() => {
     if (!siteDraft || !currentSiteKey) return;
@@ -1308,6 +1308,8 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
     };
 
     if (draftMatchesSite) seeded = mergeMissingFormValues(seeded, homeDraftSnapshot);
+    const stickyDefaults = siteDefaultMapRef.current[currentSiteKey];
+    if (stickyDefaults) seeded = mergeMissingFormValues(seeded, stickyDefaults);
     if (previousSiteLog) seeded = mergeMissingFormValues(seeded, toFormState(previousSiteLog));
 
     const memoDraft = getMemoAutosave(form.siteValue, form.siteName, form.workDate);
@@ -1328,6 +1330,24 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
     previousSiteLog,
     today,
   ]);
+
+  useEffect(() => {
+    if (!hasSiteName || !currentSiteKey || !canEditSite) return;
+    siteDefaultMapRef.current[currentSiteKey] = {
+      ...createDefaultForm(today),
+      siteValue: form.siteValue,
+      siteName: form.siteName,
+      workDate: today,
+      dept: form.dept,
+      memo: "",
+      manpower: cloneManpowerRows(form.manpower),
+      workSets: cloneWorkSets(form.workSets),
+      materials: cloneMaterials(form.materials),
+      photos: [],
+      drawings: [],
+      status: "draft",
+    };
+  }, [canEditSite, currentSiteKey, form.dept, form.manpower, form.materials, form.siteName, form.siteValue, form.workSets, hasSiteName, today]);
 
   useEffect(() => {
     if (!hasSiteName || !hasDate) return;
@@ -1379,6 +1399,19 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
     [],
   );
 
+  const openSiteSearch = () => {
+    setIsSiteSearchCompact(false);
+    setShowSiteDropdown(true);
+    window.setTimeout(() => {
+      siteInputRef.current?.focus();
+    }, 0);
+  };
+
+  const closeSiteSearch = () => {
+    setShowSiteDropdown(false);
+    if (hasSiteName) setIsSiteSearchCompact(true);
+  };
+
   const selectSite = (siteId: string, siteName: string, dept?: string) => {
     setForm((prev) => ({
       ...prev,
@@ -1388,6 +1421,7 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
     }));
     setSiteSearch(siteName);
     setShowSiteDropdown(false);
+    setIsSiteSearchCompact(true);
     loadKeyRef.current = "";
   };
 
@@ -1404,6 +1438,7 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
     }));
     setSiteSearch(card.siteName);
     setShowSiteDropdown(false);
+    setIsSiteSearchCompact(true);
     setActiveTab("write");
     if (targetDate) {
       setOpenDates((prev) => ({ ...prev, [targetDate]: true }));
@@ -1417,6 +1452,7 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
     setSiteDraft(null);
     setSiteMemo("");
     setOpenDates({});
+    setIsSiteSearchCompact(false);
     setActiveTab("write");
     setLogListOpen(false);
     setGalleryKind(null);
@@ -1476,6 +1512,17 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
     setLogListOpen(false);
     setGalleryKind(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const ensureEditableSite = () => {
+    if (canEditSite) return true;
+    toast.error("승인대기 상태입니다. 하단 [통합요청 취소] 후 수정할 수 있습니다.");
+    return false;
+  };
+
+  const openSheetWithGuard = (next: Exclude<SheetType, null>) => {
+    if (!ensureEditableSite()) return;
+    setSheet(next);
   };
 
   const normalizeMediaForSave = (
@@ -1748,6 +1795,10 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
       toast.error("현장을 먼저 선택해주세요.");
       return;
     }
+    if (isPendingSite) {
+      toast.error("승인대기 상태입니다. 통합요청 취소 후 임시저장할 수 있습니다.");
+      return;
+    }
 
     const saved = await handleSave("draft", { silent: true });
     if (!saved) return;
@@ -1762,7 +1813,44 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
     toast.success("현장 누적 임시저장이 완료되었습니다.");
   };
 
+  const handleUnifiedCancelRequest = async () => {
+    if (!hasSiteName) {
+      toast.error("현장을 먼저 선택해주세요.");
+      return;
+    }
+    if (!isPendingSite) {
+      toast.error("현재 승인대기 상태가 아닙니다.");
+      return;
+    }
+
+    try {
+      const dateEntryMap = new Map<string, WorklogEntry>();
+      selectedSiteLogs.forEach((entry) => {
+        if (entry.workDate && !dateEntryMap.has(entry.workDate)) dateEntryMap.set(entry.workDate, entry);
+      });
+      const pendingTargets = [...dateEntryMap.values()].filter((entry) => entry.status === "pending");
+      const now = new Date().toISOString();
+
+      for (const entry of pendingTargets) {
+        await statusMutation.mutateAsync({ id: entry.id, status: "draft" });
+        if (entry.workDate) {
+          dateEntryMap.set(entry.workDate, { ...entry, status: "draft", updatedAt: now });
+        }
+      }
+
+      saveSiteDraftSnapshot("draft", { dateEntryMap });
+      setForm((prev) => ({ ...prev, status: "draft" }));
+      toast.success("통합승인요청이 취소되었습니다. 수정 후 다시 요청하세요.");
+    } catch (error) {
+      toast.error(errorMessage(error, "승인요청 취소에 실패했습니다."));
+    }
+  };
+
   const handleUnifiedRequest = async () => {
+    if (isPendingSite) {
+      toast.error("현재 승인대기 상태입니다. 필요 시 통합요청 취소를 이용하세요.");
+      return;
+    }
     if (!siteReadyToSubmit) {
       toast.error("통합승인요청 조건(현장/투입/작업/사진·도면)을 확인해주세요.");
       return;
@@ -1820,6 +1908,7 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
       label?: string;
     },
   ) => {
+    if (!ensureEditableSite()) return;
     if (!fileList || fileList.length === 0) return;
 
     if (!hasSiteName || !hasDate) {
@@ -1848,6 +1937,7 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
   };
 
   const removeMediaItem = async (type: AttachmentType, index: number) => {
+    if (!ensureEditableSite()) return;
     const source = type === "photo" ? form.photos : form.drawings;
     const target = source[index];
     if (!target) return;
@@ -1865,6 +1955,7 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
   };
 
   const togglePhotoItemStatus = (index: number) => {
+    if (!ensureEditableSite()) return;
     setForm((prev) => ({
       ...prev,
       photos: prev.photos.map((item, rowIndex) => {
@@ -1877,6 +1968,7 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
   };
 
   const toggleDrawingItemStatus = (index: number) => {
+    if (!ensureEditableSite()) return;
     setForm((prev) => ({
       ...prev,
       drawings: prev.drawings.map((item, rowIndex) => {
@@ -1888,6 +1980,7 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
   };
 
   const openDrawingMarking = async (item: LegacyMedia, index: number) => {
+    if (!ensureEditableSite()) return;
     const legacy = getLegacyUrl(item);
     if (legacy) {
       setMarking({ open: true, index, imageSrc: legacy });
@@ -1904,6 +1997,7 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
   };
 
   const addMaterialFromPreset = () => {
+    if (!ensureEditableSite()) return;
     const qty = Number(materialQty || 0);
     const name = (isMaterialDirect ? customMaterialValue : materialSelect).trim();
     if (!name || qty <= 0) {
@@ -1931,52 +2025,95 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
       <section className="sticky top-0 z-30 border-b border-border bg-background/95 px-0 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85">
         <div className="space-y-2">
           <div className="relative">
-              <input
-                value={siteSearch}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  setSiteSearch(next);
-                  setShowSiteDropdown(true);
-                  if (!next.trim()) {
-                    setForm((prev) => ({ ...prev, siteValue: "", siteName: "", dept: "" }));
-                  }
-                }}
-                onFocus={() => setShowSiteDropdown(true)}
-                onBlur={() => window.setTimeout(() => setShowSiteDropdown(false), 120)}
-                placeholder="현장 선택 또는 검색"
-                className="w-full h-[52px] rounded-xl border border-border bg-card px-4 pr-11 text-base-app font-semibold text-foreground outline-none transition-all hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)]"
-              />
+            {isSiteSearchCompact && hasSiteName ? (
               <button
                 type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => setShowSiteDropdown((prev) => !prev)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                onClick={openSiteSearch}
+                className="w-full h-[44px] rounded-xl border border-border bg-card px-3 transition-all hover:border-primary/50"
               >
-                {showSiteDropdown ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-              </button>
-
-              {showSiteDropdown && (
-                <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-xl border border-border bg-card shadow-soft">
-                  {filteredSiteOptions.length > 0 ? (
-                    <div className="max-h-64 overflow-y-auto">
-                      {filteredSiteOptions.map((site) => (
-                        <button
-                          key={site.site_id}
-                          type="button"
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => selectSite(site.site_id, site.site_name, site.dept)}
-                          className="w-full px-4 py-3 text-left hover:bg-muted transition-colors"
-                        >
-                          <p className="text-sm-app font-bold text-foreground">{site.site_name}</p>
-                          {site.dept && <p className="text-tiny text-text-sub">{site.dept}</p>}
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="px-4 py-5 text-sm-app text-text-sub">검색 결과가 없습니다.</div>
-                  )}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 inline-flex items-center gap-1.5">
+                    <Search className="h-4 w-4 text-text-sub" />
+                    <span className="truncate text-sm-app font-semibold text-foreground">{form.siteName}</span>
+                  </div>
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-text-sub">
+                    검색열기 <ChevronDown className="h-3.5 w-3.5" />
+                  </span>
                 </div>
-              )}
+              </button>
+            ) : (
+              <>
+                <input
+                  ref={siteInputRef}
+                  value={siteSearch}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    setSiteSearch(next);
+                    setShowSiteDropdown(true);
+                    if (!next.trim()) {
+                      setForm((prev) => ({ ...prev, siteValue: "", siteName: "", dept: "" }));
+                      setIsSiteSearchCompact(false);
+                    }
+                  }}
+                  onFocus={() => {
+                    setShowSiteDropdown(true);
+                    setIsSiteSearchCompact(false);
+                  }}
+                  onBlur={() => window.setTimeout(closeSiteSearch, 120)}
+                  placeholder="현장 선택 또는 검색"
+                  className="w-full h-[52px] rounded-xl border border-border bg-card px-4 pr-20 text-base-app font-semibold text-foreground outline-none transition-all hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)]"
+                />
+                {siteSearch ? (
+                  <button
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      setSiteSearch("");
+                      setShowSiteDropdown(false);
+                      setForm((prev) => ({ ...prev, siteValue: "", siteName: "", dept: "" }));
+                      setIsSiteSearchCompact(false);
+                    }}
+                    className="absolute right-10 top-1/2 -translate-y-1/2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted text-muted-foreground"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    setIsSiteSearchCompact(false);
+                    setShowSiteDropdown((prev) => !prev);
+                  }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                >
+                  {showSiteDropdown ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                </button>
+
+                {showSiteDropdown && (
+                  <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-xl border border-border bg-card shadow-soft">
+                    {filteredSiteOptions.length > 0 ? (
+                      <div className="max-h-64 overflow-y-auto">
+                        {filteredSiteOptions.map((site) => (
+                          <button
+                            key={site.site_id}
+                            type="button"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => selectSite(site.site_id, site.site_name, site.dept)}
+                            className="w-full px-4 py-3 text-left hover:bg-muted transition-colors"
+                          >
+                            <p className="text-sm-app font-bold text-foreground">{site.site_name}</p>
+                            {site.dept && <p className="text-tiny text-text-sub">{site.dept}</p>}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="px-4 py-5 text-sm-app text-text-sub">검색 결과가 없습니다.</div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           {hasSiteName ? (
@@ -2080,6 +2217,9 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
                   <span className="inline-flex h-6 items-center rounded-lg border border-sky-200 bg-sky-50 px-2 text-[12px] font-semibold text-sky-700">
                     소속 {card.dept || "미지정"}
                   </span>
+                  <span className="inline-flex h-6 items-center rounded-lg border border-indigo-200 bg-indigo-50 px-2 text-[12px] font-semibold text-indigo-700">
+                    원청사 {card.dept || "미지정"}
+                  </span>
                   <span className="inline-flex h-6 items-center rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
                     사진 {card.photoCount}
                   </span>
@@ -2087,6 +2227,7 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
                     도면 {card.drawingCount}
                   </span>
                 </div>
+                <p className="mt-1 truncate text-[12px] font-semibold text-text-sub">{siteCardActionHint(card.status)}</p>
               </button>
             ))
           )}
@@ -2113,12 +2254,12 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
                     소속 {form.dept || "미지정"}
                   </span>
                   <span className="inline-flex h-6 items-center rounded-lg border border-indigo-200 bg-indigo-50 px-2 text-[12px] font-semibold text-indigo-700">
-                    원청 {affiliationLabel}
+                    원청사 {affiliationLabel}
                   </span>
                 </div>
               </div>
 
-              <p className="mt-2 truncate text-tiny font-semibold text-text-sub">{headerInlineSummary}</p>
+              <p className="mt-2 truncate text-tiny font-semibold text-text-sub">{nextActionGuide}</p>
               <div className="mt-2.5">
                 <WorklogStatusProgress status={siteUnitStatus} />
               </div>
@@ -2127,7 +2268,7 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
             <section
               className={cn(
                 "rounded-2xl border px-4 py-2.5",
-                isReadyToSubmit ? "border-rose-200 bg-rose-50" : "border-rose-200 bg-rose-50",
+                siteReadyToSubmit ? "border-rose-200 bg-rose-50" : "border-rose-200 bg-rose-50",
               )}
             >
               <div className="flex items-center gap-2.5">
@@ -2205,7 +2346,11 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
                 value={siteMemo}
                 onChange={(event) => setSiteMemo(event.target.value)}
                 placeholder="현장 통합 메모를 입력하세요."
-                className="min-h-[50px] w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm-app font-medium text-foreground outline-none transition-all focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)]"
+                readOnly={!canEditSite}
+                className={cn(
+                  "min-h-[50px] w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm-app font-medium text-foreground outline-none transition-all focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)]",
+                  !canEditSite && "bg-muted/40 text-text-sub",
+                )}
               />
             </section>
 
@@ -2214,32 +2359,36 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
                 icon={<Users className="w-5 h-5 text-header-navy" />}
                 title="투입"
                 summary={manpowerSummary}
-                onClick={() => setSheet("manpower")}
+                onClick={() => openSheetWithGuard("manpower")}
+                disabled={!canEditSite}
               />
 
               <SummaryCard
                 icon={<HardHat className="w-5 h-5 text-header-navy" />}
                 title="작업"
                 summary={workSummary}
-                onClick={() => setSheet("work")}
+                onClick={() => openSheetWithGuard("work")}
                 required
                 missing={workValidCount === 0}
+                disabled={!canEditSite}
               />
 
               <SummaryCard
                 icon={<Package className="w-5 h-5 text-header-navy" />}
                 title="자재"
                 summary={materialSummary}
-                onClick={() => setSheet("material")}
+                onClick={() => openSheetWithGuard("material")}
+                disabled={!canEditSite}
               />
 
               <SummaryCard
                 icon={<Camera className="w-5 h-5 text-header-navy" />}
                 title="사진 · 도면"
                 summary={mediaSummary}
-                onClick={() => setSheet("media")}
+                onClick={() => openSheetWithGuard("media")}
                 required
                 missing={mediaRequiredCount === 0}
+                disabled={!canEditSite}
               />
             </section>
 
@@ -2251,14 +2400,22 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
               <textarea
                 rows={4}
                 value={form.memo}
-                onChange={(event) => setForm((prev) => ({ ...prev, memo: event.target.value }))}
+                onChange={(event) => {
+                  if (!canEditSite) return;
+                  setForm((prev) => ({ ...prev, memo: event.target.value }));
+                }}
                 onInput={(event) => {
+                  if (!canEditSite) return;
                   const el = event.currentTarget;
                   el.style.height = "auto";
                   el.style.height = `${Math.max(50, el.scrollHeight)}px`;
                 }}
                 placeholder="메모를 입력하면 자동으로 저장됩니다."
-                className="min-h-[50px] w-full resize-none rounded-xl border border-border bg-background px-3 py-2.5 text-sm-app font-medium text-foreground outline-none transition-all focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)]"
+                readOnly={!canEditSite}
+                className={cn(
+                  "min-h-[50px] w-full resize-none rounded-xl border border-border bg-background px-3 py-2.5 text-sm-app font-medium text-foreground outline-none transition-all focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)]",
+                  !canEditSite && "bg-muted/40 text-text-sub",
+                )}
               />
             </section>
           </>
@@ -2452,19 +2609,27 @@ function WorkerWorklogPage({ writerName }: { writerName: string }) {
             <button
               type="button"
               onClick={handleUnifiedDraftSave}
-              disabled={busy || !hasSiteName}
-              className="h-[52px] rounded-xl bg-muted text-sm-app font-bold text-foreground disabled:opacity-50"
+              disabled={busy || !hasSiteName || isPendingSite}
+              className={cn(
+                "h-[52px] rounded-xl text-sm-app font-bold disabled:opacity-50",
+                isPendingSite ? "bg-muted text-text-sub" : "bg-muted text-foreground",
+              )}
             >
-              {busy ? "저장중..." : "통합 임시저장"}
+              {isPendingSite ? "승인대기중" : busy ? "저장중..." : "통합 임시저장"}
             </button>
             <button
               type="button"
-              onClick={handleUnifiedRequest}
-              disabled={busy || !siteReadyToSubmit}
-              className="h-[52px] rounded-xl bg-header-navy text-sm-app font-bold text-header-navy-foreground disabled:opacity-50"
+              onClick={isPendingSite ? handleUnifiedCancelRequest : handleUnifiedRequest}
+              disabled={isPendingSite ? busy || !hasSiteName : busy || !siteReadyToSubmit}
+              className={cn(
+                "h-[52px] rounded-xl text-sm-app font-bold disabled:opacity-50",
+                isPendingSite ? "bg-red-600 text-white" : "bg-header-navy text-header-navy-foreground",
+                (pulseRequest || pulseCancel) && "animate-pulse",
+              )}
             >
               <span className="inline-flex items-center gap-1">
-                <Send className="h-4 w-4" /> 통합승인요청
+                {isPendingSite ? <X className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+                {isPendingSite ? "통합요청 취소" : "통합승인요청"}
               </span>
             </button>
           </div>
@@ -3310,6 +3475,7 @@ function SummaryCard({
   summary,
   required = false,
   missing = false,
+  disabled = false,
   onClick,
 }: {
   icon: React.ReactNode;
@@ -3317,14 +3483,16 @@ function SummaryCard({
   summary: string;
   required?: boolean;
   missing?: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       className={cn(
-        "w-full rounded-2xl border bg-card px-4 py-3 shadow-soft text-left transition-all active:scale-[0.99]",
+        "w-full rounded-2xl border bg-card px-4 py-3 shadow-soft text-left transition-all active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed",
         missing ? "border-red-200" : "border-border",
       )}
     >
