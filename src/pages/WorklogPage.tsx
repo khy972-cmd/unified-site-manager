@@ -55,6 +55,17 @@ import {
 import DocumentViewer from "@/components/viewer/DocumentViewer";
 import PartnerWorklogPage from "@/components/partner/PartnerWorklogPage";
 import DrawingMarkingOverlay from "@/components/overlays/DrawingMarkingOverlay";
+import {
+  appendSiteWorklogSnapshot,
+  buildSnapshotRowsFromLogs,
+  deriveSiteStatusFromLogs,
+  getSiteWorklogDraft,
+  listSiteWorklogDrafts,
+  toSiteDraftKey,
+  upsertSiteWorklogDraft,
+  type SiteWorklogDraft,
+  type SiteWorklogSnapshotRow,
+} from "@/lib/siteWorklogDraftStore";
 
 const PREDEFINED_WORKERS = ["이현수", "김철수", "박영희", "정유진", "최민수"];
 const MEMBER_CHIPS = ["슬라브", "거더", "기둥", "기타"];
@@ -159,6 +170,19 @@ interface SiteMediaRow {
   title: string;
 }
 
+interface SiteCardSummary {
+  siteKey: string;
+  siteValue: string;
+  siteName: string;
+  dept: string;
+  status: WorklogStatus;
+  dateCount: number;
+  photoCount: number;
+  drawingCount: number;
+  lastUpdatedAt: string;
+  latestVersion: number;
+}
+
 function asString(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
@@ -227,7 +251,7 @@ function createDefaultForm(today: string): WorklogFormState {
     workDate: today,
     dept: "",
     memo: "",
-    manpower: [createManpower(PREDEFINED_WORKERS[0])],
+    manpower: [createManpower()],
     workSets: [createWorkSet()],
     materials: [],
     photos: [],
@@ -605,6 +629,18 @@ function summarizeMaterials(materials: MaterialItem[]) {
 function normalizeText(value: string) {
   return value.toLowerCase().trim();
 }
+
+function formatDateTimeLabel(value: string) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  return `${y}-${m}-${d} ${hh}:${mm}`;
+}
 function buildMemoStorageKey(siteValue: string, siteName: string, date: string) {
   return `${siteKey(siteValue, siteName)}|${date}`;
 }
@@ -731,7 +767,7 @@ function toFormStateFromSiteDaily(params: {
 
 export default function WorklogPage() {
   const { user } = useAuth();
-  const { isPartner, isAdmin, loading: roleLoading } = useUserRole();
+  const { isPartner, loading: roleLoading } = useUserRole();
   const metadataNameCandidates = [user?.user_metadata?.name, user?.user_metadata?.full_name, user?.user_metadata?.nickname];
   const metadataWriterName =
     metadataNameCandidates.find((value) => typeof value === "string" && value.trim()) as string | undefined;
@@ -746,10 +782,10 @@ export default function WorklogPage() {
   }
 
   if (isPartner) return <PartnerWorklogPage />;
-  return <WorkerWorklogPage userId={user?.id ?? null} isAdmin={isAdmin} writerName={writerName} />;
+  return <WorkerWorklogPage writerName={writerName} />;
 }
 
-function WorkerWorklogPage({ userId, isAdmin, writerName }: { userId: string | null; isAdmin: boolean; writerName: string }) {
+function WorkerWorklogPage({ writerName }: { writerName: string }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
@@ -785,6 +821,10 @@ function WorkerWorklogPage({ userId, isAdmin, writerName }: { userId: string | n
     index: number;
     imageSrc: string;
   }>({ open: false, index: -1, imageSrc: "" });
+  const [siteDraft, setSiteDraft] = useState<SiteWorklogDraft | null>(null);
+  const [siteMemo, setSiteMemo] = useState("");
+  const [draftTick, setDraftTick] = useState(0);
+  const [openDates, setOpenDates] = useState<Record<string, boolean>>({});
 
   const loadKeyRef = useRef("");
   const activeMediaIdsRef = useRef<string[]>([]);
@@ -806,6 +846,89 @@ function WorkerWorklogPage({ userId, isAdmin, writerName }: { userId: string | n
       }),
     [logs],
   );
+  const siteDraftMap = useMemo(() => {
+    const map = new Map<string, SiteWorklogDraft>();
+    listSiteWorklogDrafts().forEach((item) => map.set(item.siteKey, item));
+    return map;
+  }, [draftTick]);
+
+  const siteCards = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        base: SiteCardSummary;
+        dates: Set<string>;
+      }
+    >();
+
+    siteList.forEach((site) => {
+      const key = toSiteDraftKey(site.site_id, site.site_name);
+      if (!key) return;
+      const draft = siteDraftMap.get(key);
+      map.set(key, {
+        base: {
+          siteKey: key,
+          siteValue: site.site_id,
+          siteName: site.site_name,
+          dept: site.dept || "",
+          status: draft?.status || "draft",
+          dateCount: draft?.includedDates.length || 0,
+          photoCount: 0,
+          drawingCount: 0,
+          lastUpdatedAt: draft?.lastUpdatedAt || "",
+          latestVersion: draft?.latestVersion || 0,
+        },
+        dates: new Set(draft?.includedDates || []),
+      });
+    });
+
+    sortedLogs.forEach((log) => {
+      const key = toSiteDraftKey(log.siteValue, log.siteName);
+      if (!key) return;
+      const draft = siteDraftMap.get(key);
+      const existing = map.get(key) || {
+        base: {
+          siteKey: key,
+          siteValue: log.siteValue,
+          siteName: log.siteName,
+          dept: log.dept || "",
+          status: draft?.status || deriveSiteStatusFromLogs([log]),
+          dateCount: 0,
+          photoCount: 0,
+          drawingCount: 0,
+          lastUpdatedAt: "",
+          latestVersion: 0,
+        },
+        dates: new Set<string>(),
+      };
+
+      if (log.workDate) existing.dates.add(log.workDate);
+      existing.base = {
+        ...existing.base,
+        siteValue: existing.base.siteValue || log.siteValue,
+        siteName: existing.base.siteName || log.siteName,
+        dept: existing.base.dept || log.dept || "",
+        status: draft?.status || existing.base.status,
+        photoCount: existing.base.photoCount + Number(log.photoCount || 0),
+        drawingCount: existing.base.drawingCount + Number(log.drawingCount || 0),
+        lastUpdatedAt:
+          existing.base.lastUpdatedAt && existing.base.lastUpdatedAt > (log.updatedAt || log.createdAt)
+            ? existing.base.lastUpdatedAt
+            : log.updatedAt || log.createdAt,
+        latestVersion: Math.max(existing.base.latestVersion || 0, Number(log.version || 0), draft?.latestVersion || 0),
+        dateCount: existing.dates.size,
+      };
+      map.set(key, existing);
+    });
+
+    return [...map.values()]
+      .map((item) => ({ ...item.base, dateCount: item.dates.size || item.base.dateCount }))
+      .filter((item) => !!item.siteName)
+      .sort((a, b) => {
+        if (a.lastUpdatedAt !== b.lastUpdatedAt) return b.lastUpdatedAt.localeCompare(a.lastUpdatedAt);
+        return a.siteName.localeCompare(b.siteName);
+      });
+  }, [siteList, sortedLogs, siteDraftMap]);
 
   const filteredSiteOptions = useMemo(() => {
     const q = normalizeText(siteSearch);
@@ -820,6 +943,7 @@ function WorkerWorklogPage({ userId, isAdmin, writerName }: { userId: string | n
       siteList.find((site) => site.site_name === form.siteName)
     );
   }, [siteList, form.siteValue, form.siteName]);
+  const currentSiteKey = useMemo(() => siteKey(form.siteValue, form.siteName), [form.siteValue, form.siteName]);
 
   const selectedSiteLogs = useMemo(
     () => sortedLogs.filter((log) => isSameSite(log, form.siteValue, form.siteName)),
@@ -839,11 +963,6 @@ function WorkerWorklogPage({ userId, isAdmin, writerName }: { userId: string | n
     if (!form.workDate) return undefined;
     return selectedSiteLogMap.get(form.workDate);
   }, [selectedSiteLogMap, form.workDate]);
-
-  const isOwner = (entry: WorklogEntry) => !entry.createdBy || !userId || entry.createdBy === userId;
-  const canRequestEntry = (entry: WorklogEntry) => (isAdmin || isOwner(entry)) && (entry.status === "draft" || entry.status === "rejected");
-  const canWithdrawEntry = (entry: WorklogEntry) => (isAdmin || isOwner(entry)) && entry.status === "pending";
-  const canApproveEntry = (entry: WorklogEntry) => isAdmin && entry.status === "pending";
 
   const previousSiteLog = useMemo(() => {
     if (!form.workDate) return undefined;
@@ -872,6 +991,42 @@ function WorkerWorklogPage({ userId, isAdmin, writerName }: { userId: string | n
     mediaRequiredCount === 0 ? "사진 또는 도면 1건 이상" : "",
   ].filter(Boolean);
   const pendingInline = pendingItems.map(compactPendingLabel).join(" · ");
+  const siteManpowerValidCount = useMemo(
+    () =>
+      dailyRows.reduce(
+        (sum, row) => sum + row.manpower.filter((item) => item.worker.trim() && Number(item.workHours || 0) > 0).length,
+        0,
+      ),
+    [dailyRows],
+  );
+  const siteWorkValidCount = useMemo(
+    () =>
+      dailyRows.reduce(
+        (sum, row) =>
+          sum +
+          row.workSets.filter((item) => resolvedValue(item.member || "", item.customMemberValue || "") && resolvedValue(item.process || "", item.customProcessValue || "")).length,
+        0,
+      ),
+    [dailyRows],
+  );
+  const sitePhotoValidCount = useMemo(
+    () => dailyRows.reduce((sum, row) => sum + rowPhotoCount(row), 0),
+    [dailyRows],
+  );
+  const siteDrawingValidCount = useMemo(
+    () => dailyRows.reduce((sum, row) => sum + getRowDrawings(row).length, 0),
+    [dailyRows],
+  );
+  const siteMediaValidCount = sitePhotoValidCount + siteDrawingValidCount;
+  const siteReadyToSubmit = hasSiteName && siteManpowerValidCount > 0 && siteWorkValidCount > 0 && siteMediaValidCount > 0;
+  const sitePendingInline = [
+    !hasSiteName ? "현장" : "",
+    siteManpowerValidCount === 0 ? "투입" : "",
+    siteWorkValidCount === 0 ? "작업" : "",
+    siteMediaValidCount === 0 ? "사진/도면" : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const manpowerSummary =
     manpowerValidCount > 0
@@ -951,6 +1106,79 @@ function WorkerWorklogPage({ userId, isAdmin, writerName }: { userId: string | n
       }),
     [siteDailyModel.dailyData],
   );
+  const includedDates = useMemo(() => dailyRows.map((row) => row.date).filter(Boolean), [dailyRows]);
+
+  useEffect(() => {
+    if (!currentSiteKey || !hasSiteName) {
+      setSiteDraft(null);
+      setSiteMemo("");
+      return;
+    }
+
+    const existing = getSiteWorklogDraft(currentSiteKey);
+    if (existing) {
+      setSiteDraft(existing);
+      setSiteMemo(existing.memo || "");
+      return;
+    }
+
+    const bootstrap = upsertSiteWorklogDraft({
+      siteKey: currentSiteKey,
+      siteId: form.siteValue,
+      siteName: form.siteName,
+      dept: form.dept,
+      memo: "",
+      status: deriveSiteStatusFromLogs(selectedSiteLogs),
+      includedDates,
+      latestVersion: 0,
+      snapshots: [],
+    });
+
+    const withSnapshot =
+      selectedSiteLogs.length > 0
+        ? appendSiteWorklogSnapshot({
+            draft: bootstrap,
+            status: deriveSiteStatusFromLogs(selectedSiteLogs),
+            memo: "",
+            includedDates,
+            rows: buildSnapshotRowsFromLogs(selectedSiteLogs),
+          })
+        : bootstrap;
+
+    setSiteDraft(withSnapshot);
+    setSiteMemo(withSnapshot.memo || "");
+    setDraftTick((prev) => prev + 1);
+  }, [currentSiteKey, form.dept, form.siteName, form.siteValue, hasSiteName, includedDates, selectedSiteLogs]);
+
+  const siteUnitStatus = useMemo(
+    () => siteDraft?.status || deriveSiteStatusFromLogs(selectedSiteLogs),
+    [siteDraft, selectedSiteLogs],
+  );
+  const siteUnitVersion = siteDraft?.latestVersion || 0;
+  const siteUnitUpdatedAt = siteDraft?.lastUpdatedAt || selectedSiteLogs[0]?.updatedAt || selectedSiteLogs[0]?.createdAt || "";
+  const latestSiteLogUpdatedAt = selectedSiteLogs[0]?.updatedAt || selectedSiteLogs[0]?.createdAt || "";
+
+  useEffect(() => {
+    if (!siteDraft || !currentSiteKey) return;
+    if (!latestSiteLogUpdatedAt) return;
+    if (latestSiteLogUpdatedAt <= siteDraft.lastUpdatedAt) return;
+    const derived = deriveSiteStatusFromLogs(selectedSiteLogs);
+    if (derived === siteDraft.status) return;
+    const next = upsertSiteWorklogDraft({
+      siteKey: siteDraft.siteKey,
+      siteId: siteDraft.siteId,
+      siteName: siteDraft.siteName,
+      dept: siteDraft.dept,
+      memo: siteDraft.memo,
+      status: derived,
+      includedDates: siteDraft.includedDates,
+      latestVersion: siteDraft.latestVersion,
+      snapshots: siteDraft.snapshots,
+      rejectedReason: derived === "rejected" ? siteDraft.rejectedReason || "반려됨" : undefined,
+    });
+    setSiteDraft(next);
+    setDraftTick((prev) => prev + 1);
+  }, [currentSiteKey, latestSiteLogUpdatedAt, selectedSiteLogs, siteDraft]);
 
   const sitePhotoRows = useMemo(() => {
     const list: SiteMediaRow[] = [];
@@ -1157,6 +1385,38 @@ function WorkerWorklogPage({ userId, isAdmin, writerName }: { userId: string | n
     loadKeyRef.current = "";
   };
 
+  const enterSiteFromCard = (card: SiteCardSummary) => {
+    const draft = getSiteWorklogDraft(card.siteKey);
+    const latest = sortedLogs.find((log) => isSameSite(log, card.siteValue, card.siteName));
+    const targetDate = latest?.workDate || draft?.includedDates?.[0] || today;
+    setForm((prev) => ({
+      ...prev,
+      siteValue: card.siteValue,
+      siteName: card.siteName,
+      dept: card.dept || latest?.dept || prev.dept,
+      workDate: targetDate,
+    }));
+    setSiteSearch(card.siteName);
+    setShowSiteDropdown(false);
+    setActiveTab("write");
+    if (targetDate) {
+      setOpenDates((prev) => ({ ...prev, [targetDate]: true }));
+    }
+    loadKeyRef.current = "";
+  };
+
+  const leaveSiteEditor = () => {
+    setForm((prev) => ({ ...prev, siteValue: "", siteName: "", dept: "", memo: "" }));
+    setSiteSearch("");
+    setSiteDraft(null);
+    setSiteMemo("");
+    setOpenDates({});
+    setActiveTab("write");
+    setLogListOpen(false);
+    setGalleryKind(null);
+    loadKeyRef.current = "";
+  };
+
   const resetCurrentForm = () => {
     setForm((prev) => ({
       ...createDefaultForm(today),
@@ -1210,19 +1470,6 @@ function WorkerWorklogPage({ userId, isAdmin, writerName }: { userId: string | n
     setLogListOpen(false);
     setGalleryKind(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const updateStatus = async (entry: WorklogEntry, nextStatus: WorklogStatus) => {
-    if (busy) return;
-    try {
-      await statusMutation.mutateAsync({ id: entry.id, status: nextStatus });
-      if (editingLogId === entry.id) {
-        setForm((prev) => ({ ...prev, status: nextStatus }));
-      }
-      toast.success(`상태를 ${STATUS_META[nextStatus].label}(으)로 변경했습니다.`);
-    } catch (error) {
-      toast.error(errorMessage(error, "상태 변경에 실패했습니다."));
-    }
   };
 
   const normalizeMediaForSave = (
@@ -1361,22 +1608,22 @@ function WorkerWorklogPage({ userId, isAdmin, writerName }: { userId: string | n
     };
   };
 
-  const handleSave = async (intent: SaveIntent): Promise<boolean> => {
-    if (busy) return false;
+  const handleSave = async (intent: SaveIntent, options?: { silent?: boolean }): Promise<WorklogEntry | null> => {
+    if (busy) return null;
 
     if (!hasSiteName) {
       toast.error("현장명을 선택해주세요.");
-      return false;
+      return null;
     }
 
     if (!hasDate) {
       toast.error("작업일자를 선택해주세요.");
-      return false;
+      return null;
     }
 
     if (intent === "pending" && !isReadyToSubmit) {
       toast.error("승인요청 조건(현장/투입/작업/사진·도면)을 확인해주세요.");
-      return false;
+      return null;
     }
 
     setIsSaving(true);
@@ -1390,13 +1637,14 @@ function WorkerWorklogPage({ userId, isAdmin, writerName }: { userId: string | n
       ]);
 
       const payload = buildPayload(intent, existing ? existing.version + 1 : 1, preparedPhotos, preparedDrawings);
+      let savedEntry: WorklogEntry;
 
       if (existing) {
-        await updateMutation.mutateAsync({ id: existing.id, entry: payload });
-        setEditingLogId(existing.id);
+        savedEntry = await updateMutation.mutateAsync({ id: existing.id, entry: payload });
       } else {
-        await saveMutation.mutateAsync(payload);
+        savedEntry = await saveMutation.mutateAsync(payload);
       }
+      setEditingLogId(savedEntry.id);
 
       setForm((prev) => ({
         ...prev,
@@ -1406,13 +1654,139 @@ function WorkerWorklogPage({ userId, isAdmin, writerName }: { userId: string | n
       }));
       clearMemoAutosave(form.siteValue, form.siteName, form.workDate);
       loadKeyRef.current = "";
-      toast.success(intent === "pending" ? "승인요청이 완료되었습니다." : "임시저장되었습니다.");
-      return true;
+      if (!options?.silent) {
+        toast.success(intent === "pending" ? "승인요청이 완료되었습니다." : "임시저장되었습니다.");
+      }
+      return savedEntry;
     } catch (error) {
       toast.error(errorMessage(error, "저장에 실패했습니다."));
-      return false;
+      return null;
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const buildSiteSnapshotRows = (options?: {
+    requested?: boolean;
+    dateEntryMap?: Map<string, WorklogEntry>;
+    requestedIds?: Set<string>;
+  }): SiteWorklogSnapshotRow[] => {
+    const now = new Date().toISOString();
+    const requested = !!options?.requested;
+    return dailyRows.map((row) => {
+      const linked = options?.dateEntryMap?.get(row.date) || selectedSiteLogMap.get(row.date);
+      const shouldPending =
+        requested &&
+        !!linked &&
+        ((options?.requestedIds && options.requestedIds.has(linked.id)) ||
+          linked.status === "draft" ||
+          linked.status === "rejected");
+      const nextStatus = shouldPending ? "pending" : linked?.status || row.status;
+      return {
+        worklogId: linked?.id || `virtual_${currentSiteKey}_${row.date}`,
+        date: row.date,
+        version: Math.max(1, Number(linked?.version || row.versions || 1)),
+        status: nextStatus,
+        updatedAt: shouldPending ? now : linked?.updatedAt || linked?.createdAt || now,
+      };
+    });
+  };
+
+  const ensureSiteDraftBase = () => {
+    const key = currentSiteKey;
+    if (!key) return null;
+    const existing = siteDraft || getSiteWorklogDraft(key);
+    if (existing) return existing;
+    return upsertSiteWorklogDraft({
+      siteKey: key,
+      siteId: form.siteValue,
+      siteName: form.siteName,
+      dept: form.dept,
+      memo: siteMemo,
+      status: deriveSiteStatusFromLogs(selectedSiteLogs),
+      includedDates,
+      latestVersion: 0,
+      snapshots: [],
+    });
+  };
+
+  const saveSiteDraftSnapshot = (
+    nextStatus: WorklogStatus,
+    options?: {
+      dateEntryMap?: Map<string, WorklogEntry>;
+      requestedIds?: Set<string>;
+    },
+  ) => {
+    const base = ensureSiteDraftBase();
+    if (!base) return null;
+    const snapshotDates = [...new Set(includedDates)].sort((a, b) => b.localeCompare(a));
+    const next = appendSiteWorklogSnapshot({
+      draft: base,
+      status: nextStatus,
+      memo: siteMemo,
+      includedDates: snapshotDates,
+      rows: buildSiteSnapshotRows({
+        requested: nextStatus === "pending",
+        dateEntryMap: options?.dateEntryMap,
+        requestedIds: options?.requestedIds,
+      }),
+      rejectedReason: nextStatus === "rejected" ? siteDraft?.rejectedReason : undefined,
+    });
+    setSiteDraft(next);
+    setDraftTick((prev) => prev + 1);
+    return next;
+  };
+
+  const handleUnifiedDraftSave = async () => {
+    if (!hasSiteName) {
+      toast.error("현장을 먼저 선택해주세요.");
+      return;
+    }
+
+    const saved = await handleSave("draft", { silent: true });
+    if (!saved) return;
+
+    const dateEntryMap = new Map<string, WorklogEntry>();
+    selectedSiteLogs.forEach((entry) => {
+      if (entry.workDate && !dateEntryMap.has(entry.workDate)) dateEntryMap.set(entry.workDate, entry);
+    });
+    if (saved.workDate) dateEntryMap.set(saved.workDate, saved);
+
+    saveSiteDraftSnapshot("draft", { dateEntryMap });
+    toast.success("현장 누적 임시저장이 완료되었습니다.");
+  };
+
+  const handleUnifiedRequest = async () => {
+    if (!siteReadyToSubmit) {
+      toast.error("통합승인요청 조건(현장/투입/작업/사진·도면)을 확인해주세요.");
+      return;
+    }
+
+    try {
+      const saved = await handleSave("draft", { silent: true });
+      if (!saved) return;
+
+      const dateEntryMap = new Map<string, WorklogEntry>();
+      selectedSiteLogs.forEach((entry) => {
+        if (entry.workDate && !dateEntryMap.has(entry.workDate)) dateEntryMap.set(entry.workDate, entry);
+      });
+      if (saved.workDate) dateEntryMap.set(saved.workDate, saved);
+
+      const requestTargets = [...dateEntryMap.values()].filter((entry) => entry.status === "draft" || entry.status === "rejected");
+      const requestIds = new Set<string>(requestTargets.map((entry) => entry.id));
+      const now = new Date().toISOString();
+      for (const entry of requestTargets) {
+        await statusMutation.mutateAsync({ id: entry.id, status: "pending" });
+        if (entry.workDate) {
+          dateEntryMap.set(entry.workDate, { ...entry, status: "pending", updatedAt: now });
+        }
+      }
+
+      saveSiteDraftSnapshot("pending", { dateEntryMap, requestedIds: requestIds });
+      setForm((prev) => ({ ...prev, status: "pending" }));
+      toast.success("현장 통합승인요청이 완료되었습니다.");
+    } catch (error) {
+      toast.error(errorMessage(error, "통합승인요청에 실패했습니다."));
     }
   };
 
@@ -1599,62 +1973,115 @@ function WorkerWorklogPage({ userId, isAdmin, writerName }: { userId: string | n
               )}
           </div>
 
-          <div className="grid grid-cols-[1fr_auto] gap-2">
-            <input
-              type="date"
-              value={form.workDate}
-              onChange={(event) => setForm((prev) => ({ ...prev, workDate: event.target.value }))}
-              className="h-[52px] rounded-xl border border-border bg-card px-3 text-sm-app font-semibold text-foreground outline-none transition-all hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)]"
-            />
+          {hasSiteName ? (
+            <>
+              <div className="grid grid-cols-[1fr_auto_auto] gap-2">
+                <input
+                  type="date"
+                  value={form.workDate}
+                  onChange={(event) => setForm((prev) => ({ ...prev, workDate: event.target.value }))}
+                  className="h-[52px] rounded-xl border border-border bg-card px-3 text-sm-app font-semibold text-foreground outline-none transition-all hover:border-primary/50 focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)]"
+                />
 
-            <button
-              type="button"
-              onClick={() => setLogListOpen(true)}
-              className="inline-flex h-[52px] items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3 text-sm-app font-semibold text-text-sub transition-all hover:border-primary/50 whitespace-nowrap"
-            >
-              <ClipboardList className="h-4 w-4" />
-              일지목록
-            </button>
-          </div>
+                <button
+                  type="button"
+                  onClick={() => setLogListOpen(true)}
+                  className="inline-flex h-[52px] items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3 text-sm-app font-semibold text-text-sub transition-all hover:border-primary/50 whitespace-nowrap"
+                >
+                  <ClipboardList className="h-4 w-4" />
+                  일지목록
+                </button>
+                <button
+                  type="button"
+                  onClick={leaveSiteEditor}
+                  className="inline-flex h-[52px] items-center justify-center rounded-xl border border-border bg-card px-3 text-sm-app font-semibold text-text-sub transition-all hover:border-primary/50 whitespace-nowrap"
+                >
+                  현장목록
+                </button>
+              </div>
 
-          <div className="grid grid-cols-2 gap-2 rounded-xl border border-border bg-card p-1">
-              <button
-                type="button"
-                onClick={() => setActiveTab("write")}
-                className={cn(
-                  "h-10 rounded-lg text-sm-app font-bold transition-colors",
-                  activeTab === "write" ? "bg-header-navy text-header-navy-foreground" : "text-text-sub hover:bg-muted",
-                )}
-              >
-                작성
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTab("view");
-                  setLogListOpen(true);
-                }}
-                className={cn(
-                  "h-10 rounded-lg text-sm-app font-bold transition-colors",
-                  activeTab === "view" ? "bg-header-navy text-header-navy-foreground" : "text-text-sub hover:bg-muted",
-                )}
-              >
-                일지보기
-              </button>
-          </div>
+              <div className="grid grid-cols-2 gap-2 rounded-xl border border-border bg-card p-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("write")}
+                  className={cn(
+                    "h-10 rounded-lg text-sm-app font-bold transition-colors",
+                    activeTab === "write" ? "bg-header-navy text-header-navy-foreground" : "text-text-sub hover:bg-muted",
+                  )}
+                >
+                  누적작성
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("view")}
+                  className={cn(
+                    "h-10 rounded-lg text-sm-app font-bold transition-colors",
+                    activeTab === "view" ? "bg-header-navy text-header-navy-foreground" : "text-text-sub hover:bg-muted",
+                  )}
+                >
+                  날짜보기
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="rounded-xl border border-border bg-card px-3 py-2 text-sm-app font-semibold text-text-sub">
+              현장 카드를 선택하면 날짜 누적 작업일지를 편집할 수 있습니다.
+            </div>
+          )}
         </div>
       </section>
+      {!hasSiteName ? (
+        <section className="space-y-2 pt-3">
+          {siteCards.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-border bg-card px-4 py-12 text-center text-sm-app font-semibold text-text-sub">
+              등록된 현장이 없습니다.
+            </div>
+          ) : (
+            siteCards.map((card) => (
+              <button
+                key={card.siteKey}
+                type="button"
+                onClick={() => enterSiteFromCard(card)}
+                className="relative w-full overflow-hidden rounded-2xl border border-border bg-card px-4 py-4 text-left shadow-soft transition-all hover:border-primary/40"
+              >
+                <span className={cn("absolute top-0 right-0 px-2.5 py-1 text-[11px] font-bold text-white rounded-bl-xl", STATUS_META[card.status].cornerClass)}>
+                  {STATUS_META[card.status].label}
+                </span>
+                <p className="truncate pr-14 text-[19px] font-[800] leading-snug text-header-navy">{card.siteName}</p>
+                <p className="mt-0.5 text-tiny font-semibold text-text-sub">
+                  최근 업데이트 {formatDateTimeLabel(card.lastUpdatedAt)} · 포함 날짜 {card.dateCount}건 · 통합 v{card.latestVersion || 1}
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="inline-flex h-6 items-center rounded-lg border border-sky-200 bg-sky-50 px-2 text-[12px] font-semibold text-sky-700">
+                    소속 {card.dept || "미지정"}
+                  </span>
+                  <span className="inline-flex h-6 items-center rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
+                    사진 {card.photoCount}
+                  </span>
+                  <span className="inline-flex h-6 items-center rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
+                    도면 {card.drawingCount}
+                  </span>
+                </div>
+              </button>
+            ))
+          )}
+        </section>
+      ) : (
+        <>
       <div className="space-y-3 pt-3">
         {activeTab === "write" ? (
           <>
             <section className="relative overflow-hidden rounded-2xl border border-border bg-card px-4 py-4 shadow-soft">
-              <span className={cn("absolute top-0 right-0 z-10 px-2.5 py-1 text-[11px] font-bold rounded-bl-xl", STATUS_META[currentStatus].cornerClass)}>
-                {STATUS_META[currentStatus].label}
+              <span className={cn("absolute top-0 right-0 z-10 px-2.5 py-1 text-[11px] font-bold rounded-bl-xl", STATUS_META[siteUnitStatus].cornerClass)}>
+                {STATUS_META[siteUnitStatus].label}
               </span>
               <div className="min-w-0 pr-16">
                 <div className="text-sm-app text-text-sub font-medium mb-1 max-[640px]:mb-0.5">{form.workDate || "-"}</div>
                 <p className="truncate text-[19px] font-[800] leading-snug text-header-navy">
                   {form.siteName || "현장을 선택하세요"}
+                </p>
+                <p className="mt-0.5 text-tiny font-semibold text-text-sub">
+                  최근 업데이트 {formatDateTimeLabel(siteUnitUpdatedAt)} · 포함 날짜 {includedDates.length}건 · 통합 v{siteUnitVersion || 1}
                 </p>
                 <div className="mt-1 flex items-center gap-1.5">
                   <span className="inline-flex h-6 items-center rounded-lg border border-sky-200 bg-sky-50 px-2 text-[12px] font-semibold text-sky-700">
@@ -1668,7 +2095,7 @@ function WorkerWorklogPage({ userId, isAdmin, writerName }: { userId: string | n
 
               <p className="mt-2 truncate text-tiny font-semibold text-text-sub">{headerInlineSummary}</p>
               <div className="mt-2.5">
-                <WorklogStatusProgress status={currentStatus} />
+                <WorklogStatusProgress status={siteUnitStatus} />
               </div>
             </section>
 
@@ -1682,15 +2109,79 @@ function WorkerWorklogPage({ userId, isAdmin, writerName }: { userId: string | n
                 <div
                   className={cn(
                     "inline-flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full border bg-white",
-                    isReadyToSubmit ? "border-rose-300 text-rose-600" : "border-rose-300 text-rose-600",
+                    siteReadyToSubmit ? "border-rose-300 text-rose-600" : "border-rose-300 text-rose-600",
                   )}
                 >
-                  {isReadyToSubmit ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
+                  {siteReadyToSubmit ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
                 </div>
                 <div className="min-w-0 truncate whitespace-nowrap text-[13px] font-semibold leading-none text-rose-800">
-                  {isReadyToSubmit ? "승인요청 가능" : `필수: ${pendingInline}`}
+                  {siteReadyToSubmit ? "통합승인요청 가능" : `필수: ${sitePendingInline}`}
                 </div>
               </div>
+            </section>
+
+            <section className="rounded-2xl border border-border bg-card px-4 py-3 shadow-soft">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-sm-app font-bold text-header-navy">날짜 섹션 편집 ({includedDates.length})</p>
+                <span className="text-tiny font-semibold text-text-sub">접기/펼치기</span>
+              </div>
+              <div className="space-y-1.5">
+                {dailyRows.map((row) => {
+                  const expanded = !!openDates[row.date];
+                  const isCurrent = row.date === form.workDate;
+                  return (
+                    <div key={`write_date_${row.date}`} className={cn("rounded-lg border px-3 py-2", isCurrent ? "border-primary/50 bg-primary-bg/40" : "border-border bg-background")}>
+                      <button
+                        type="button"
+                        onClick={() => setOpenDates((prev) => ({ ...prev, [row.date]: !expanded }))}
+                        className="flex w-full items-center justify-between"
+                      >
+                        <p className="text-sm-app font-semibold text-header-navy">
+                          {row.date} {isCurrent ? "(현재 편집)" : ""}
+                        </p>
+                        {expanded ? <ChevronUp className="h-4 w-4 text-text-sub" /> : <ChevronDown className="h-4 w-4 text-text-sub" />}
+                      </button>
+                      {expanded && (
+                        <div className="mt-1.5 flex items-center justify-between">
+                          <p className="text-tiny font-medium text-text-sub">
+                            투입 {row.manpower.length} · 작업 {row.workSets.length} · 사진 {rowPhotoCount(row)} · 도면 {getRowDrawings(row).length}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => moveToDate(row.date)}
+                            className="h-7 rounded-lg border border-primary/40 bg-primary-bg px-2 text-[11px] font-semibold text-primary"
+                          >
+                            불러오기
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            {siteUnitStatus === "rejected" && (
+              <section className="rounded-2xl border border-red-200 bg-red-50 px-4 py-2.5">
+                <p className="text-sm-app font-semibold text-red-700">
+                  현장 통합반려 상태입니다. 반려 날짜 섹션을 우선 수정한 뒤 통합승인요청을 다시 진행하세요.
+                </p>
+                {siteDraft?.rejectedReason && <p className="mt-1 text-tiny font-medium text-red-600">{siteDraft.rejectedReason}</p>}
+              </section>
+            )}
+
+            <section className="rounded-2xl border border-border bg-card px-4 py-3 shadow-soft">
+              <div className="mb-1.5 flex items-center justify-between">
+                <p className="text-sm-app font-bold text-header-navy">통합 메모</p>
+                <span className="text-tiny font-semibold text-text-sub">현장 단위</span>
+              </div>
+              <textarea
+                rows={2}
+                value={siteMemo}
+                onChange={(event) => setSiteMemo(event.target.value)}
+                placeholder="현장 통합 메모를 입력하세요."
+                className="min-h-[50px] w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm-app font-medium text-foreground outline-none transition-all focus:border-primary focus:shadow-[0_0_0_3px_rgba(49,163,250,0.15)]"
+              />
             </section>
 
             <section className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -1768,64 +2259,50 @@ function WorkerWorklogPage({ userId, isAdmin, writerName }: { userId: string | n
               ) : (
                 <div className="space-y-2">
                   {dailyRows.map((row) => {
-                    const entry = selectedSiteLogMap.get(row.date);
+                    const expanded = !!openDates[row.date];
+                    const isRejectedRow = row.status === "rejected";
                     return (
-                      <div key={`${row.date}_${row.versions}`} className="rounded-xl border border-border bg-background px-3 py-3">
+                      <div
+                        key={`${row.date}_${row.versions}`}
+                        className={cn(
+                          "rounded-xl border bg-background px-3 py-3",
+                          isRejectedRow ? "border-red-200 bg-red-50/40" : "border-border",
+                        )}
+                      >
                         <button
                           type="button"
-                          onClick={() => moveToDate(row.date)}
-                          className="w-full text-left transition-colors hover:bg-muted"
+                          onClick={() => setOpenDates((prev) => ({ ...prev, [row.date]: !expanded }))}
+                          className="w-full text-left"
                         >
                           <div className="flex items-center justify-between gap-2">
                             <p className="text-sm-app font-bold text-header-navy">
                               {row.date} · v{row.versions}
                             </p>
-                            <span className={cn("inline-flex h-6 items-center rounded-full border px-2 text-[11px] font-bold", STATUS_META[row.status].chipClass)}>
-                              {STATUS_META[row.status].label}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className={cn("inline-flex h-6 items-center rounded-full border px-2 text-[11px] font-bold", STATUS_META[row.status].chipClass)}>
+                                {STATUS_META[row.status].label}
+                              </span>
+                              {expanded ? <ChevronUp className="h-4 w-4 text-text-sub" /> : <ChevronDown className="h-4 w-4 text-text-sub" />}
+                            </div>
                           </div>
                           <p className="mt-1 text-tiny font-medium text-text-sub">
                             투입 {row.manpower.length}명 · 작업 {row.workSets.length}건 · 사진 {rowPhotoCount(row)} · 도면 {getRowDrawings(row).length} · 확인서 {rowReceiptCount(row)}
                           </p>
                         </button>
-                        {entry && (
-                          <div className="mt-2 flex gap-1.5">
-                            {canRequestEntry(entry) && (
+                        {expanded && (
+                          <div className="mt-2 rounded-lg border border-border bg-card px-3 py-2.5">
+                            <p className="text-tiny font-medium text-text-sub">
+                              날짜 섹션 내용을 수정하려면 아래 버튼으로 작성 탭에서 해당 날짜를 불러오세요.
+                            </p>
+                            <div className="mt-2 flex items-center justify-end">
                               <button
                                 type="button"
-                                onClick={() => updateStatus(entry, "pending")}
-                                className="h-8 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
+                                onClick={() => moveToDate(row.date)}
+                                className="h-8 rounded-lg border border-primary/40 bg-primary-bg px-2.5 text-[11px] font-semibold text-primary"
                               >
-                                승인요청
+                                해당 날짜 수정
                               </button>
-                            )}
-                            {canWithdrawEntry(entry) && (
-                              <button
-                                type="button"
-                                onClick={() => updateStatus(entry, "draft")}
-                                className="h-8 rounded-lg border border-blue-200 bg-blue-50 px-2.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
-                              >
-                                요청취소
-                              </button>
-                            )}
-                            {canApproveEntry(entry) && (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => updateStatus(entry, "approved")}
-                                  className="h-8 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100"
-                                >
-                                  승인
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => updateStatus(entry, "rejected")}
-                                  className="h-8 rounded-lg border border-red-200 bg-red-50 px-2.5 text-[11px] font-semibold text-red-700 hover:bg-red-100"
-                                >
-                                  반려
-                                </button>
-                              </>
-                            )}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1949,24 +2426,26 @@ function WorkerWorklogPage({ userId, isAdmin, writerName }: { userId: string | n
           <div className="grid grid-cols-2 gap-2 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+12px)]">
             <button
               type="button"
-              onClick={() => handleSave("draft")}
-              disabled={busy || !hasSiteName || !hasDate}
+              onClick={handleUnifiedDraftSave}
+              disabled={busy || !hasSiteName}
               className="h-[52px] rounded-xl bg-muted text-sm-app font-bold text-foreground disabled:opacity-50"
             >
-              {busy ? "저장중..." : "임시저장"}
+              {busy ? "저장중..." : "통합 임시저장"}
             </button>
             <button
               type="button"
-              onClick={() => handleSave("pending")}
-              disabled={busy || !isReadyToSubmit}
+              onClick={handleUnifiedRequest}
+              disabled={busy || !siteReadyToSubmit}
               className="h-[52px] rounded-xl bg-header-navy text-sm-app font-bold text-header-navy-foreground disabled:opacity-50"
             >
               <span className="inline-flex items-center gap-1">
-                <Send className="h-4 w-4" /> 승인요청
+                <Send className="h-4 w-4" /> 통합승인요청
               </span>
             </button>
           </div>
         </div>
+      )}
+        </>
       )}
       <Drawer open={logListOpen} onOpenChange={setLogListOpen}>
         <DrawerContent className="z-[80] mx-auto max-w-[600px] rounded-t-2xl border-t border-border bg-white">
