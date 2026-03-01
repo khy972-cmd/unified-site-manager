@@ -349,6 +349,10 @@ function rowReceiptCount(row: SiteDailyRow) {
   return getReceiptItems(getRowPhotos(row)).length;
 }
 
+function summarizeDailyRow(row: SiteDailyRow) {
+  return `투입 ${row.manpower.length} · 작업 ${row.workSets.length} · 사진 ${rowPhotoCount(row)} · 도면 ${getRowDrawings(row).length} · 확인서 ${rowReceiptCount(row)}`;
+}
+
 function photoStatusLabel(status: string) {
   const value = normalizePhotoStatus(status);
   if (value === "before") return "보수전";
@@ -635,11 +639,25 @@ function formatDateTimeLabel(value: string) {
   return `${y}-${m}-${d} ${hh}:${mm}`;
 }
 
+function formatShortDateLabel(value: string) {
+  if (!value) return "-";
+  const matched = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (matched) {
+    return `${matched[1].slice(2)}.${matched[2]}.${matched[3]}`;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const yy = String(date.getFullYear()).slice(2);
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yy}.${mm}.${dd}`;
+}
+
 function siteCardActionHint(status: WorklogStatus) {
-  if (status === "pending") return "승인 대기중 · 요청취소 또는 결과 확인";
+  if (status === "pending") return "승인 대기중 · 통합요청 취소 후 수정";
   if (status === "rejected") return "반려됨 · 반려 날짜부터 수정";
   if (status === "approved") return "완료 · 변경 시 날짜 선택 후 수정";
-  return "필요한 날짜만 수정";
+  return "날짜 수정은 버튼 클릭";
 }
 function buildMemoStorageKey(siteValue: string, siteName: string, date: string) {
   return `${siteKey(siteValue, siteName)}|${date}`;
@@ -1162,6 +1180,7 @@ function WorkerWorklogPage() {
   const latestSiteLogUpdatedAt = selectedSiteLogs[0]?.updatedAt || selectedSiteLogs[0]?.createdAt || "";
   const isPendingSite = siteUnitStatus === "pending";
   const canEditSite = siteUnitStatus !== "pending";
+  const trimmedSiteMemo = siteMemo.trim();
   const nextActionGuide = useMemo(() => {
     if (siteUnitStatus === "pending") return "현재 상태: 승인대기 · 다음 단계: 하단 [통합요청 취소] 후 수정";
     if (siteUnitStatus === "approved") return "현재 상태: 완료 · 다음 단계: 변경사항 있으면 수정 저장 후 통합승인요청";
@@ -2259,27 +2278,27 @@ function WorkerWorklogPage() {
                 onClick={() => enterSiteFromCard(card)}
                 className="relative w-full overflow-hidden rounded-2xl border border-border bg-card px-4 py-4 text-left shadow-soft transition-all hover:border-primary/40"
               >
-                <span className={cn("absolute top-0 right-0 px-2.5 py-1 text-[11px] font-bold text-white rounded-bl-xl", STATUS_META[card.status].cornerClass)}>
+                <span className={cn("absolute top-0 right-0 px-2.5 py-1 text-[11px] font-bold text-white whitespace-nowrap rounded-bl-xl", STATUS_META[card.status].cornerClass)}>
                   {STATUS_META[card.status].label}
                 </span>
                 <p className="truncate pr-14 text-[19px] font-[800] leading-snug text-header-navy">{card.siteName}</p>
                 <p className="mt-0.5 text-tiny font-semibold text-text-sub">
-                  최근 {formatDateTimeLabel(card.lastUpdatedAt)} · 포함 날짜 {card.dateCount}건 · 통합 v{card.latestVersion || 1}
+                  최신 {formatDateTimeLabel(card.lastUpdatedAt)} · 포함 날짜 {card.dateCount}건 · 통합 v{card.latestVersion || 1}
                 </p>
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <span className="inline-flex h-6 items-center rounded-lg border border-sky-200 bg-sky-50 px-2 text-[12px] font-semibold text-sky-700">
-                    소속 {card.dept || "미지정"}
+                <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-0.5 pr-1 no-scrollbar">
+                  <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-sky-200 bg-sky-50 px-2 text-[12px] font-semibold text-sky-700">
+                    소속 HQ {card.dept || "미지정"}
                   </span>
-                  <span className="inline-flex h-6 items-center rounded-lg border border-indigo-200 bg-indigo-50 px-2 text-[12px] font-semibold text-indigo-700">
-                    원청사 {card.dept || "미지정"}
+                  <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-indigo-200 bg-indigo-50 px-2 text-[12px] font-semibold text-indigo-700">
+                    원청사 HQ {card.dept || "미지정"}
                   </span>
-                  <span className="inline-flex h-6 items-center rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
+                  <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
                     사진 {Math.max(0, card.photoCount - card.receiptCount)}
                   </span>
-                  <span className="inline-flex h-6 items-center rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
+                  <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
                     도면 {card.drawingCount}
                   </span>
-                  <span className="inline-flex h-6 items-center rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
+                  <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
                     확인서 {card.receiptCount}
                   </span>
                 </div>
@@ -2294,7 +2313,7 @@ function WorkerWorklogPage() {
         {activeTab === "write" ? (
           <>
             <section className="relative overflow-hidden rounded-2xl border border-border bg-card px-4 py-4 shadow-soft">
-              <span className={cn("absolute top-0 right-0 z-10 px-2.5 py-1 text-[11px] font-bold rounded-bl-xl", STATUS_META[siteUnitStatus].cornerClass)}>
+              <span className={cn("absolute top-0 right-0 z-10 px-2.5 py-1 text-[11px] font-bold whitespace-nowrap rounded-bl-xl", STATUS_META[siteUnitStatus].cornerClass)}>
                 {STATUS_META[siteUnitStatus].label}
               </span>
               <div className="min-w-0 pr-16">
@@ -2303,30 +2322,29 @@ function WorkerWorklogPage() {
                   {form.siteName || "현장을 선택하세요"}
                 </p>
                 <p className="mt-0.5 text-tiny font-semibold text-text-sub">
-                  최근 {formatDateTimeLabel(siteUnitUpdatedAt)} · 포함 날짜 {includedDates.length}건 · 통합 v{siteUnitVersion || 1}
+                  최신 {formatDateTimeLabel(siteUnitUpdatedAt)} · 포함 날짜 {includedDates.length}건 · 통합 v{siteUnitVersion || 1}
                 </p>
-                <div className="mt-1 flex items-center gap-1.5">
-                  <span className="inline-flex h-6 items-center rounded-lg border border-sky-200 bg-sky-50 px-2 text-[12px] font-semibold text-sky-700">
-                    소속 {form.dept || "미지정"}
+                <div className="mt-1 flex items-center gap-1.5 overflow-x-auto pb-0.5 pr-1 no-scrollbar">
+                  <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-sky-200 bg-sky-50 px-2 text-[12px] font-semibold text-sky-700">
+                    소속 HQ {form.dept || "미지정"}
                   </span>
-                  <span className="inline-flex h-6 items-center rounded-lg border border-indigo-200 bg-indigo-50 px-2 text-[12px] font-semibold text-indigo-700">
-                    원청사 {affiliationLabel}
+                  <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-indigo-200 bg-indigo-50 px-2 text-[12px] font-semibold text-indigo-700">
+                    원청사 HQ {affiliationLabel}
                   </span>
-                </div>
-                <div className="mt-1 flex items-center gap-1.5">
-                  <span className="inline-flex h-6 items-center rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
+                  <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
                     사진 {sitePhotoRows.length}
                   </span>
-                  <span className="inline-flex h-6 items-center rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
+                  <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
                     도면 {siteDrawingRows.length}
                   </span>
-                  <span className="inline-flex h-6 items-center rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
+                  <span className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-lg border border-border bg-background px-2 text-[12px] font-semibold text-text-sub">
                     확인서 {siteReceiptRows.length}
                   </span>
                 </div>
               </div>
 
-              <p className="mt-2 truncate text-tiny font-semibold text-text-sub">{nextActionGuide}</p>
+              {trimmedSiteMemo ? <p className="mt-1 truncate text-tiny font-semibold text-text-sub">메모 {trimmedSiteMemo}</p> : null}
+              <p className="mt-1 truncate text-tiny font-semibold text-text-sub">{nextActionGuide}</p>
               <div className="mt-2.5">
                 <WorklogStatusProgress status={siteUnitStatus} />
               </div>
@@ -2380,16 +2398,22 @@ function WorkerWorklogPage() {
                   const expanded = !!openDates[row.date];
                   const isCurrent = row.date === form.workDate;
                   return (
-                    <div key={`write_date_${row.date}`} className={cn("rounded-xl border px-3 py-2.5", isCurrent ? "border-primary/50 bg-primary-bg/40" : "border-border bg-background")}>
+                    <div
+                      key={`write_date_${row.date}`}
+                      className={cn(
+                        "rounded-xl border px-3 py-2.5 transition-colors hover:border-primary/40",
+                        isCurrent ? "border-primary/50 bg-primary-bg/40 ring-1 ring-primary/20" : "border-border bg-background",
+                      )}
+                    >
                       <button
                         type="button"
                         onClick={() => setOpenDates((prev) => ({ ...prev, [row.date]: !expanded }))}
                         className="flex w-full items-center justify-between gap-2"
                       >
-                        <div className="flex items-center gap-1.5">
-                          <p className="text-sm-app font-semibold text-header-navy">{row.date}</p>
+                        <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5 pr-1">
+                          <p className="text-sm-app font-semibold text-header-navy whitespace-nowrap">{formatShortDateLabel(row.date)}</p>
                           {isCurrent && (
-                            <span className="inline-flex h-5 items-center rounded-full border border-primary/30 bg-primary-bg px-2 text-[10px] font-bold text-primary">
+                            <span className="inline-flex h-5 shrink-0 items-center whitespace-nowrap rounded-full border border-primary/30 bg-primary-bg px-2 text-[10px] font-bold text-primary">
                               현재
                             </span>
                           )}
@@ -2399,7 +2423,7 @@ function WorkerWorklogPage() {
                       {expanded && (
                         <div className="mt-1.5 flex items-center justify-between">
                           <p className="text-tiny font-medium text-text-sub">
-                            투입 {row.manpower.length} · 작업 {row.workSets.length} · 사진 {rowPhotoCount(row)} · 도면 {getRowDrawings(row).length} · 확인서 {rowReceiptCount(row)}
+                            {summarizeDailyRow(row)}
                           </p>
                           <button
                             type="button"
@@ -2559,9 +2583,10 @@ function WorkerWorklogPage() {
                         />
                         <div
                           className={cn(
-                            "rounded-xl border bg-background px-3 py-3",
+                            "rounded-xl border bg-background px-3 py-3 transition-colors hover:border-primary/40",
                             isRejectedRow ? "border-red-200 bg-red-50/40" : "border-border",
-                            isCurrent && "border-primary/40",
+                            isCurrent && "border-primary/40 ring-1 ring-primary/20",
+                            isLatest && "shadow-[0_0_0_1px_rgba(49,163,250,0.12)]",
                           )}
                         >
                           <button
@@ -2571,27 +2596,27 @@ function WorkerWorklogPage() {
                           >
                             <div className="flex items-center justify-between gap-2">
                               <div className="min-w-0">
-                                <div className="flex items-center gap-1.5">
-                                  <p className="text-sm-app font-bold text-header-navy">
-                                    {row.date} · v{row.versions}
+                                <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 pr-1 no-scrollbar">
+                                  <p className="text-sm-app font-bold text-header-navy whitespace-nowrap">
+                                    {formatShortDateLabel(row.date)} · v{row.versions}
                                   </p>
                                   {isLatest && (
-                                    <span className="inline-flex h-5 items-center rounded-full border border-primary/30 bg-primary-bg px-2 text-[10px] font-bold text-primary">
+                                    <span className="inline-flex h-5 shrink-0 items-center whitespace-nowrap rounded-full border border-primary/30 bg-primary-bg px-2 text-[10px] font-bold text-primary">
                                       최신
                                     </span>
                                   )}
                                   {isCurrent && (
-                                    <span className="inline-flex h-5 items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 text-[10px] font-bold text-indigo-700">
+                                    <span className="inline-flex h-5 shrink-0 items-center whitespace-nowrap rounded-full border border-indigo-200 bg-indigo-50 px-2 text-[10px] font-bold text-indigo-700">
                                       현재
                                     </span>
                                   )}
                                 </div>
-                                <p className="mt-1 text-tiny font-medium text-text-sub">
-                                  투입 {row.manpower.length}명 · 작업 {row.workSets.length}건 · 사진 {rowPhotoCount(row)} · 도면 {getRowDrawings(row).length} · 확인서 {rowReceiptCount(row)}
+                                <p className="mt-1 truncate text-tiny font-medium text-text-sub">
+                                  {summarizeDailyRow(row)}
                                 </p>
                               </div>
-                              <div className="flex items-center gap-2">
-                                <span className={cn("inline-flex h-6 items-center rounded-full border px-2 text-[11px] font-bold", STATUS_META[row.status].chipClass)}>
+                              <div className="flex shrink-0 items-center gap-2">
+                                <span className={cn("inline-flex h-6 items-center whitespace-nowrap rounded-full border px-2 text-[11px] font-bold", STATUS_META[row.status].chipClass)}>
                                   {STATUS_META[row.status].label}
                                 </span>
                                 {expanded ? <ChevronUp className="h-4 w-4 text-text-sub" /> : <ChevronDown className="h-4 w-4 text-text-sub" />}
@@ -2600,16 +2625,20 @@ function WorkerWorklogPage() {
                           </button>
                           {expanded && (
                             <div className="mt-2 rounded-lg border border-border bg-card px-3 py-2">
-                              <p className="truncate text-tiny font-medium text-text-sub">날짜 수정은 버튼으로 바로 불러오세요.</p>
-                              <div className="mt-2 flex items-center justify-end">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="min-w-0 truncate text-tiny font-medium text-text-sub">날짜 수정은 버튼 클릭</p>
                                 <button
                                   type="button"
                                   onClick={() => moveToDate(row.date)}
-                                  className="h-8 rounded-lg border border-primary/40 bg-primary-bg px-2.5 text-[11px] font-semibold text-primary"
+                                  className={cn(
+                                    "h-8 rounded-lg border border-primary/40 bg-primary-bg px-2.5 text-[11px] font-semibold text-primary transition-all hover:border-primary",
+                                    isCurrent && "shadow-[0_0_0_2px_rgba(49,163,250,0.18)]",
+                                  )}
                                 >
                                   해당 날짜 수정
                                 </button>
                               </div>
+                              {row.memo.trim() ? <p className="mt-1 truncate text-[11px] font-medium text-text-sub">메모 {row.memo.trim()}</p> : null}
                             </div>
                           )}
                         </div>
@@ -2641,7 +2670,7 @@ function WorkerWorklogPage() {
                   {photoGroups.slice(0, 4).map((group) => (
                     <div key={`photo_group_${group.date}`} className="rounded-xl border border-border bg-background px-2.5 py-2.5">
                       <div className="mb-1.5 flex items-center justify-between">
-                        <p className="text-tiny font-semibold text-header-navy">{group.date}</p>
+                        <p className="text-tiny font-semibold text-header-navy">{formatShortDateLabel(group.date)}</p>
                         <button type="button" onClick={() => moveToDate(group.date)} className="text-[11px] font-semibold text-primary">
                           해당 일지 이동
                         </button>
@@ -2694,7 +2723,7 @@ function WorkerWorklogPage() {
                   {drawingGroups.slice(0, 4).map((group) => (
                     <div key={`drawing_group_${group.date}`} className="rounded-xl border border-border bg-background px-2.5 py-2.5">
                       <div className="mb-1.5 flex items-center justify-between">
-                        <p className="text-tiny font-semibold text-header-navy">{group.date}</p>
+                        <p className="text-tiny font-semibold text-header-navy">{formatShortDateLabel(group.date)}</p>
                         <button type="button" onClick={() => moveToDate(group.date)} className="text-[11px] font-semibold text-primary">
                           해당 일지 이동
                         </button>
@@ -2747,7 +2776,7 @@ function WorkerWorklogPage() {
                   {receiptGroups.slice(0, 4).map((group) => (
                     <div key={`receipt_group_${group.date}`} className="rounded-xl border border-border bg-background px-2.5 py-2.5">
                       <div className="mb-1.5 flex items-center justify-between">
-                        <p className="text-tiny font-semibold text-header-navy">{group.date}</p>
+                        <p className="text-tiny font-semibold text-header-navy">{formatShortDateLabel(group.date)}</p>
                         <button type="button" onClick={() => moveToDate(group.date)} className="text-[11px] font-semibold text-primary">
                           해당 일지 이동
                         </button>
@@ -2842,15 +2871,15 @@ function WorkerWorklogPage() {
                   className="w-full rounded-xl border border-border bg-background px-3 py-3 text-left hover:bg-muted"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm-app font-bold text-header-navy">
-                      {row.date} · v{row.versions}
+                    <p className="text-sm-app font-bold text-header-navy whitespace-nowrap">
+                      {formatShortDateLabel(row.date)} · v{row.versions}
                     </p>
-                    <span className={cn("inline-flex h-6 items-center rounded-full border px-2 text-[11px] font-bold", STATUS_META[row.status].chipClass)}>
+                    <span className={cn("inline-flex h-6 items-center whitespace-nowrap rounded-full border px-2 text-[11px] font-bold", STATUS_META[row.status].chipClass)}>
                       {STATUS_META[row.status].label}
                     </span>
                   </div>
-                  <p className="mt-1 text-tiny font-medium text-text-sub">
-                    투입 {row.manpower.length}명 · 작업 {row.workSets.length}건 · 사진 {rowPhotoCount(row)} · 도면 {getRowDrawings(row).length} · 확인서 {rowReceiptCount(row)}
+                  <p className="mt-1 truncate text-tiny font-medium text-text-sub">
+                    {summarizeDailyRow(row)}
                   </p>
                 </button>
               ))
@@ -2876,7 +2905,7 @@ function WorkerWorklogPage() {
               galleryGroups.map((group) => (
                 <div key={`gallery_${galleryKind}_${group.date}`} className="rounded-xl border border-border bg-background p-2.5">
                   <div className="mb-2 flex items-center justify-between">
-                    <p className="text-tiny font-semibold text-header-navy">{group.date}</p>
+                    <p className="text-tiny font-semibold text-header-navy">{formatShortDateLabel(group.date)}</p>
                     <button
                       type="button"
                       onClick={() => moveToDate(group.date)}
@@ -3401,26 +3430,26 @@ function WorkerWorklogPage() {
                   <button
                     type="button"
                     onClick={() => photoInputRef.current?.click()}
-                    className="h-[50px] rounded-xl border border-dashed border-primary bg-primary/5 text-sm-app font-bold text-primary inline-flex items-center justify-center gap-1.5 transition-colors hover:bg-primary/10"
+                    className="w-full h-[50px] border border-dashed border-primary bg-primary/5 text-primary rounded-xl font-bold inline-flex items-center justify-center gap-2 hover:bg-primary/10 transition-colors text-sm-app"
                   >
-                    <Camera className="w-4 h-4" /> 사진 업로드/촬영
+                    <Camera className="w-4 h-4" /> 사진 등록
                   </button>
                   <button
                     type="button"
                     onClick={() => drawingInputRef.current?.click()}
-                    className="h-[50px] rounded-xl border border-dashed border-teal-300 bg-teal-50 text-sm-app font-bold text-teal-700 inline-flex items-center justify-center gap-1.5 transition-colors hover:bg-teal-100"
+                    className="w-full h-[50px] border border-dashed border-teal-400 bg-teal-50 text-teal-600 rounded-xl font-bold inline-flex items-center justify-center gap-2 hover:bg-teal-100 transition-colors text-sm-app"
                   >
-                    <ImageIcon className="w-4 h-4" /> 도면 추가
+                    <ImageIcon className="w-4 h-4" /> 도면 업로드
                   </button>
                   <button
                     type="button"
                     onClick={() => receiptInputRef.current?.click()}
-                    className="h-[50px] rounded-xl border border-dashed border-indigo-300 bg-indigo-50 text-sm-app font-bold text-indigo-700 inline-flex items-center justify-center gap-1.5 transition-colors hover:bg-indigo-100"
+                    className="w-full h-[50px] border border-dashed border-primary bg-primary/5 text-primary rounded-xl font-bold inline-flex items-center justify-center gap-2 hover:bg-primary/10 transition-colors text-sm-app"
                   >
                     <ClipboardList className="w-4 h-4" /> 확인서 이미지
                   </button>
                 </div>
-                <p className="text-tiny text-text-sub">업로드는 작성 탭에서만 가능하며, 현장 문서함에 자동 누적됩니다.</p>
+                <p className="text-tiny text-text-sub">작성 탭 업로드는 현장 문서함에 자동 누적됩니다.</p>
 
                 <input
                   ref={photoInputRef}
@@ -3751,7 +3780,7 @@ function WorklogStatusProgress({ status }: { status: WorklogStatus }) {
             <div key={step} className="flex min-w-0 flex-1 items-center">
               <span
                 className={cn(
-                  "inline-flex h-7 min-w-11 items-center justify-center rounded-full border px-2 text-[11px] font-bold transition-colors",
+                  "inline-flex h-7 min-w-11 shrink-0 items-center justify-center whitespace-nowrap rounded-full border px-2 text-[11px] font-bold transition-colors",
                   filled ? filledChipClass : defaultChipClass,
                   current && ringClass,
                 )}
